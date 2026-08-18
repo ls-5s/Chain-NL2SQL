@@ -1,12 +1,21 @@
-"""Database adapter interface."""
+"""数据库适配器接口。"""
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol, Sequence
 
 from app.api.authorization import AccessPolicy
 from app.schemas.domain import QueryResult, SchemaRetrieval
+
+
+class DatabaseExecutionError(RuntimeError):
+    """数据库驱动异常离开底层时使用的安全、类型化边界。"""
+
+    def __init__(self, category: str, safe_message: str) -> None:
+        # 在边界处只保存稳定分类和脱敏后的消息。
+        super().__init__(safe_message)
+        self.category = category
+        self.safe_message = safe_message
 
 
 class DatabaseExecutor(Protocol):
@@ -14,8 +23,13 @@ class DatabaseExecutor(Protocol):
 
     def inspect_schema(self, database_id: str) -> SchemaRetrieval: ...
 
+    # deadline 是 time.monotonic() 时间轴上的绝对值，不是墙上时钟时间。
     def execute_readonly(
-        self, sql: str, deadline: datetime, access_policy: AccessPolicy
+        self,
+        sql: str,
+        deadline: float,
+        access_policy: AccessPolicy,
+        parameters: Sequence[Any] = (),
     ) -> QueryResult: ...
 
     def close(self) -> None: ...
