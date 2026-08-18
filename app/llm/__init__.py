@@ -1,2 +1,4 @@
-"""Model adapters, prompts, and output parsing."""
+"""模型适配、Prompt 与输出解析。
 
+完整使用说明见 ``docs/LLM组件实现说明.md``。
+"""
