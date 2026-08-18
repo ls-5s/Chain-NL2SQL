@@ -1,11 +1,5 @@
 <script setup lang="ts">
-import { Database, FileStack, ShieldCheck, Workflow } from "lucide-vue-next";
-
-const navigation = [
-  { label: "查询工作台", to: "/", icon: Workflow },
-  { label: "审批中心", to: "/approvals", icon: ShieldCheck },
-  { label: "知识库", to: "/knowledge", icon: FileStack },
-];
+import { Database, ShieldCheck } from "lucide-vue-next";
 </script>
 
 <template>
@@ -18,20 +12,6 @@ const navigation = [
         <div class="ml-auto flex items-center gap-1 text-xs text-teal-800"><ShieldCheck :size="15" aria-hidden="true" />本地只读模式</div>
       </div>
     </header>
-    <div class="mx-auto flex max-w-[1520px]">
-      <aside class="hidden w-56 shrink-0 border-r border-zinc-200 bg-white p-3 md:block">
-        <nav class="space-y-1" aria-label="主导航">
-          <RouterLink v-for="item in navigation" :key="item.to" :to="item.to" class="nav-link">
-            <component :is="item.icon" :size="17" aria-hidden="true" />{{ item.label }}
-          </RouterLink>
-        </nav>
-      </aside>
-      <main class="min-w-0 flex-1"><RouterView /></main>
-    </div>
-    <nav class="fixed inset-x-0 bottom-0 z-20 flex border-t border-zinc-200 bg-white p-1 md:hidden" aria-label="移动主导航">
-      <RouterLink v-for="item in navigation" :key="item.to" :to="item.to" class="mobile-nav-link">
-        <component :is="item.icon" :size="17" aria-hidden="true" />{{ item.label }}
-      </RouterLink>
-    </nav>
+    <main class="mx-auto min-w-0 max-w-[1520px]"><RouterView /></main>
   </div>
 </template>
