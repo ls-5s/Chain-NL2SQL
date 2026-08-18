@@ -9,7 +9,14 @@ import {
   mockResolveApproval,
   mockUploadKnowledge,
 } from "@/api/mock";
-import type { ApprovalItem, ApprovalStatus, DatabaseListResponse, KnowledgeDocument, QueryRequest, QueryResponse } from "@/types/api";
+import type {
+  ApprovalItem,
+  ApprovalStatus,
+  DatabaseListResponse,
+  KnowledgeDocument,
+  QueryRequest,
+  QueryResponse,
+} from "@/types/api";
 
 const client = axios.create({
   baseURL: "/api/v1",
@@ -62,7 +69,10 @@ export async function fetchApprovals(): Promise<ApprovalItem[]> {
   throw new ApiRequestError("当前后端尚未提供审批接口。");
 }
 
-export async function resolveApproval(id: string, status: Extract<ApprovalStatus, "approved" | "rejected">): Promise<ApprovalItem> {
+export async function resolveApproval(
+  id: string,
+  status: Extract<ApprovalStatus, "approved" | "rejected">,
+): Promise<ApprovalItem> {
   if (useMockApi) return mockResolveApproval(id, status);
   throw new ApiRequestError("当前后端尚未提供审批接口。");
 }
@@ -72,7 +82,10 @@ export async function fetchKnowledgeDocuments(): Promise<KnowledgeDocument[]> {
   throw new ApiRequestError("当前后端尚未提供知识库接口。");
 }
 
-export async function uploadKnowledgeDocument(file: File, category: string): Promise<KnowledgeDocument> {
+export async function uploadKnowledgeDocument(
+  file: File,
+  category: string,
+): Promise<KnowledgeDocument> {
   if (useMockApi) return mockUploadKnowledge(file, category);
   throw new ApiRequestError("当前后端尚未提供知识库接口。");
 }
