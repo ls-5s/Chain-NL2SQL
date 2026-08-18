@@ -5,6 +5,5 @@ import "element-plus/dist/index.css";
 import "./tailwind.css";
 import App from "./App.vue";
 import { router } from "./router";
-import { pinia } from "./stores";
 
-createApp(App).use(pinia).use(router).use(ElementPlus).mount("#app");
+createApp(App).use(router).use(ElementPlus).mount("#app");

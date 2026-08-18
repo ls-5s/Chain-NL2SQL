@@ -1,10 +1,10 @@
 import { createRouter, createWebHistory } from "vue-router";
-
-import QueryWorkspace from "@/views/QueryWorkspace.vue";
+import KnowledgeBaseView from "@/views/KnowledgeBaseView.vue";
 
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: "/", name: "query-workspace", component: QueryWorkspace },
+    { path: "/", redirect: "/knowledge" },
+    { path: "/knowledge", name: "knowledge", component: KnowledgeBaseView, meta: { navLabel: "知识库", navDescription: "业务规则与数据字典" } },
   ],
 });
