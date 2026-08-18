@@ -1,0 +1,10 @@
+[project]
+name = "chain-nl2sql"
+version = "0.1.0"
+description = "A LangGraph-based self-correcting NL2SQL project."
+readme = "README.md"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+

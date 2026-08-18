@@ -2,7 +2,7 @@
 
 基于 LangGraph 的链式自纠错 NL2SQL 项目，集成 Schema-RAG、SQL 安全治理和可复现实验评测。
 
-> 项目状态：开发设计已完成，P0 核心代码待实现。本文档描述目标架构，不将规划能力表述为已上线功能。
+> 项目状态：开发设计与 P0 工程骨架已完成，LangGraph 节点、检索、数据库执行等核心业务逻辑待实现。本文档描述目标架构，不将规划能力表述为已上线功能。
 
 ## 项目目标
 
@@ -48,6 +48,7 @@ flowchart LR
 | 检索 | ChromaDB、BGE-small-zh、BM25、bge-reranker-small |
 | SQL 安全 | sqlglot、SQLite 只读 URI、MySQL 只读账号 |
 | 服务与类型 | FastAPI、Pydantic v2、Uvicorn |
+| 前端 | Vue 3、TypeScript、Vite、Tailwind CSS、Element Plus、Pinia |
 | 评测 | datasets、CSpider、Spider |
 | 测试 | pytest、httpx、可编排 `fake_llm` |
 
