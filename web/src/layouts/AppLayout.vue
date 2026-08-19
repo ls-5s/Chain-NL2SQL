@@ -8,6 +8,7 @@ import {
   Database,
   FileStack,
   Menu,
+  MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -95,14 +96,12 @@ watch(
         </div>
         <nav class="sidebar-nav" aria-label="主导航">
           <p v-if="!collapsed" class="sidebar-label">工作空间</p>
-          <RouterLink
-            to="/knowledge"
-            class="nav-item"
-            active-class="nav-item--active"
-            :title="collapsed ? '知识库' : undefined"
-            ><FileStack :size="18" /><span v-if="!collapsed">知识库</span
-            ><ChevronRight v-if="!collapsed" class="nav-item__arrow" :size="16"
-          /></RouterLink>
+          <RouterLink to="/query" class="nav-item" active-class="nav-item--active" :title="collapsed ? '数据问答' : undefined">
+            <MessageSquare :size="18" /><span v-if="!collapsed">数据问答</span><ChevronRight v-if="!collapsed" class="nav-item__arrow" :size="16" />
+          </RouterLink>
+          <RouterLink to="/knowledge" class="nav-item" active-class="nav-item--active" :title="collapsed ? '知识库' : undefined">
+            <FileStack :size="18" /><span v-if="!collapsed">知识库</span><ChevronRight v-if="!collapsed" class="nav-item__arrow" :size="16" />
+          </RouterLink>
         </nav>
         <div class="sidebar__bottom">
           <div v-if="!collapsed" class="security-note">
@@ -138,13 +137,8 @@ watch(
         </div>
         <button class="create-button" @click="openKnowledge"><Plus :size="18" />新建资料</button>
         <nav class="mobile-drawer__nav" aria-label="主导航">
-          <RouterLink
-            to="/knowledge"
-            class="nav-item"
-            active-class="nav-item--active"
-            @click="mobileOpen = false"
-            ><FileStack :size="18" />知识库</RouterLink
-          >
+          <RouterLink to="/query" class="nav-item" active-class="nav-item--active" @click="mobileOpen = false"><MessageSquare :size="18" />数据问答</RouterLink>
+          <RouterLink to="/knowledge" class="nav-item" active-class="nav-item--active" @click="mobileOpen = false"><FileStack :size="18" />知识库</RouterLink>
         </nav>
         <div class="security-note">
           <span class="security-note__icon"><ShieldCheck :size="16" /></span>

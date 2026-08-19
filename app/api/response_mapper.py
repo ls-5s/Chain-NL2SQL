@@ -1,16 +1,26 @@
-"""Convert graph state into API-safe responses.
-
-The implementation is added with the graph. Keeping it separate prevents raw errors
-or internal SQL from leaking through route handlers.
-"""
+﻿"""Convert internal graph state to the public response model."""
 
 from __future__ import annotations
 
 from typing import Any
 
+from app.schemas.domain import ErrorCategory, QueryStatus
 from app.schemas.response import QueryResponse
 
 
 def map_query_state(state: dict[str, Any]) -> QueryResponse:
-    # 在此处集中白名单化 State 字段，禁止路由层直接序列化内部状态。
-    raise NotImplementedError("Query state mapping is implemented with the graph nodes.")
+    status = state.get("status", QueryStatus.FAILED)
+    if not isinstance(status, QueryStatus):
+        status = QueryStatus(status)
+    category = state.get("error_category")
+    if category is not None and not isinstance(category, ErrorCategory):
+        category = ErrorCategory(category)
+    return QueryResponse(
+        request_id=state["request_id"],
+        status=status,
+        iteration=state.get("iteration", 0),
+        error_category=category,
+        final_answer=state.get("final_answer") or "查询未完成。",
+        result=state.get("query_result"),
+        trace=state.get("trace", []),
+    )
