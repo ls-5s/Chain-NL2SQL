@@ -1,54 +1,31 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import {
-  Check,
-  ChevronDown,
-  FileArchive,
-  FileText,
-  FolderOpen,
-  MoreHorizontal,
-  Search,
-  Trash2,
-  Upload,
-} from "lucide-vue-next";
+import { Check, ChevronDown, FileArchive, FileText, FolderOpen, Search, Trash2, Upload } from "lucide-vue-next";
 import { deleteKnowledgeDocument, fetchKnowledgeDocuments, uploadKnowledgeDocument } from "@/api/client";
 import type { KnowledgeDocument, KnowledgeDocumentStatus } from "@/types/api";
 
 const items = ref<KnowledgeDocument[]>([]);
-const category = ref("涓氬姟瑙勫垯");
+const category = ref("业务规则");
 const isLoading = ref(false);
 const errorMessage = ref<string | null>(null);
 const keyword = ref("");
-const activeFilter = ref("鍏ㄩ儴璧勬枡");
-const filters = ["鍏ㄩ儴璧勬枡", "涓氬姟瑙勫垯", "鎸囨爣鍙ｅ緞", "鏁版嵁瀛楀吀"];
-const categories = ["涓氬姟瑙勫垯", "鎸囨爣鍙ｅ緞", "鏁版嵁瀛楀吀", "椤圭洰璧勬枡"];
+const activeFilter = ref("全部资料");
+const filters = ["全部资料", "业务规则", "指标口径", "数据字典"];
+const categories = ["业务规则", "指标口径", "数据字典", "项目资料"];
 const filteredItems = computed(() => {
   const term = keyword.value.trim().toLowerCase();
-  return items.value.filter(
-    (item) =>
-      (activeFilter.value === "鍏ㄩ儴璧勬枡" || item.category === activeFilter.value) &&
-      (!term ||
-        [item.filename, item.category, item.summary].some((value) =>
-          value.toLowerCase().includes(term),
-        )),
+  return items.value.filter((item) =>
+    (activeFilter.value === "全部资料" || item.category === activeFilter.value) &&
+    (!term || [item.filename, item.category, item.summary].some((value) => value.toLowerCase().includes(term))),
   );
 });
 const indexedCount = computed(() => items.value.filter((item) => item.status === "indexed").length);
+
 function statusCopy(status: KnowledgeDocumentStatus) {
-  return { uploading: "涓婁紶涓?, parsing: "瑙ｆ瀽涓?, indexed: "宸插叆搴?, failed: "闇€澶勭悊" }[status];
-}
-function formatSize(size: number) {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  return { uploading: "上传中", parsing: "解析中", indexed: "已入库", failed: "需处理" }[status];
 }
 function formatDate(value: string) {
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
+  return new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 async function loadDocuments() {
   isLoading.value = true;
@@ -56,7 +33,7 @@ async function loadDocuments() {
   try {
     items.value = await fetchKnowledgeDocuments();
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "璧勬枡鍔犺浇澶辫触锛岃绋嶅悗閲嶈瘯銆?;
+    errorMessage.value = error instanceof Error ? error.message : "资料加载失败，请稍后重试。";
   } finally {
     isLoading.value = false;
   }
@@ -70,7 +47,7 @@ async function handleUpload(event: Event) {
     const document = await uploadKnowledgeDocument(file, category.value);
     items.value = [document, ...items.value];
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "涓婁紶澶辫触锛岃绋嶅悗閲嶈瘯銆?;
+    errorMessage.value = error instanceof Error ? error.message : "上传失败，请稍后重试。";
   } finally {
     input.value = "";
   }
@@ -81,7 +58,7 @@ async function removeDocument(id: string) {
     await deleteKnowledgeDocument(id);
     items.value = items.value.filter((item) => item.id !== id);
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "鍒犻櫎澶辫触锛岃绋嶅悗閲嶈瘯銆?;
+    errorMessage.value = error instanceof Error ? error.message : "删除失败，请稍后重试。";
   }
 }
 onMounted(loadDocuments);
@@ -91,106 +68,43 @@ onMounted(loadDocuments);
   <section class="knowledge-page">
     <header class="page-heading">
       <div>
-        <div class="breadcrumb"><span>宸ヤ綔绌洪棿</span><span>/</span><strong>鐭ヨ瘑搴?/strong></div>
-        <h1>鐭ヨ瘑搴?/h1>
-        <p>缁存姢涓氬姟瑙勫垯銆佹寚鏍囧彛寰勪笌鏁版嵁瀛楀吀锛屼负鏌ヨ鎻愪緵鍙潬鐨勮涔変笂涓嬫枃銆?/p>
+        <div class="breadcrumb"><span>工作空间</span><span>/</span><strong>知识库</strong></div>
+        <h1>知识库</h1>
+        <p>维护业务规则、指标口径与数据字典，为查询提供可靠的语义上下文。</p>
       </div>
-      <label class="upload-button"
-        ><Upload :size="17" />涓婁紶璧勬枡<input
-          type="file"
-          accept=".txt,.md,.pdf,.docx,.csv"
-          @change="handleUpload"
-      /></label>
+      <label class="upload-button">
+        <Upload :size="17" />上传资料
+        <input type="file" accept=".txt,.md,.pdf,.docx,.csv" @change="handleUpload" />
+      </label>
     </header>
+
     <div class="workspace-summary">
-      <div class="summary-card">
-        <span class="summary-card__icon"><FolderOpen :size="19" /></span>
-        <div>
-          <span>璧勬枡鎬绘暟</span><strong>{{ items.length }}</strong>
-        </div>
-      </div>
-      <div class="summary-card">
-        <span class="summary-card__icon summary-card__icon--green"><Check :size="19" /></span>
-        <div>
-          <span>宸插叆搴?/span><strong>{{ indexedCount }}</strong>
-        </div>
-      </div>
-      <div class="workspace-summary__note"><span class="live-dot" />绱㈠紩鏈嶅姟杩愯姝ｅ父</div>
+      <div class="summary-card"><span class="summary-card__icon"><FolderOpen :size="19" /></span><div><span>资料总数</span><strong>{{ items.length }}</strong></div></div>
+      <div class="summary-card"><span class="summary-card__icon summary-card__icon--green"><Check :size="19" /></span><div><span>已入库</span><strong>{{ indexedCount }}</strong></div></div>
+      <div class="workspace-summary__note"><span class="live-dot" />索引服务运行正常</div>
     </div>
+
     <div class="knowledge-toolbar">
-      <div class="filter-tabs" role="tablist" aria-label="璧勬枡鍒嗙被">
-        <button
-          v-for="filter in filters"
-          :key="filter"
-          :class="{ 'filter-tab--active': activeFilter === filter }"
-          role="tab"
-          :aria-selected="activeFilter === filter"
-          @click="activeFilter = filter"
-        >
-          {{ filter }}
-        </button>
-      </div>
+      <div class="filter-tabs"><button v-for="filter in filters" :key="filter" :class="{ active: activeFilter === filter }" @click="activeFilter = filter">{{ filter }}</button></div>
       <div class="toolbar-actions">
-        <label class="category-select"
-          ><span>褰掔被涓?/span
-          ><select v-model="category" aria-label="涓婁紶璧勬枡鐨勫垎绫?>
-            <option v-for="option in categories" :key="option" :value="option">
-              {{ option }}
-            </option></select
-          ><ChevronDown :size="14" /></label
-        ><label class="document-search"
-          ><Search :size="16" /><input v-model="keyword" type="search" placeholder="鎼滅储璧勬枡"
-        /></label>
+        <label class="category-select"><span>归类为</span><select v-model="category" aria-label="上传资料的分类"><option v-for="option in categories" :key="option" :value="option">{{ option }}</option></select><ChevronDown :size="14" /></label>
+        <label class="document-search"><Search :size="16" /><input v-model="keyword" type="search" placeholder="搜索资料" /></label>
       </div>
     </div>
+
     <p v-if="errorMessage" class="error-message">{{ errorMessage }}</p>
-    <div class="document-surface">
-      <div class="document-surface__heading">
-        <span>璧勬枡鍒楄〃</span><small>{{ filteredItems.length }} 涓粨鏋?/small>
-      </div>
-      <div v-if="isLoading" class="loading-state">姝ｅ湪鍔犺浇璧勬枡...</div>
-      <div v-else-if="!filteredItems.length" class="empty-state">
-        <FolderOpen :size="24" /><strong>娌℃湁鍖归厤鐨勮祫鏂?/strong
-        ><span>鎹竴涓叧閿瘝鎴栬祫鏂欏垎绫昏瘯璇曘€?/span>
-      </div>
-      <div v-else class="document-table" role="table" aria-label="鐭ヨ瘑搴撹祫鏂?>
-        <div class="document-table__header" role="row">
-          <span>璧勬枡鍚嶇О</span><span>鍒嗙被</span><span>鐘舵€?/span><span>鏇存柊鏃堕棿</span
-          ><span aria-label="鎿嶄綔" />
-        </div>
+    <div class="document-list">
+      <div class="document-list__heading"><span>资料列表</span><small>{{ filteredItems.length }} 个结果</small></div>
+      <div v-if="isLoading" class="loading-state">正在加载资料...</div>
+      <div v-else-if="!filteredItems.length" class="empty-state"><FolderOpen :size="24" /><strong>暂无资料</strong><span>后端知识库接口暂无数据，或当前筛选条件没有匹配结果。</span></div>
+      <div v-else class="document-table" role="table" aria-label="知识库资料">
+        <div class="document-table__header" role="row"><span>资料名称</span><span>分类</span><span>状态</span><span>更新时间</span><span aria-label="操作" /></div>
         <article v-for="item in filteredItems" :key="item.id" class="document-row" role="row">
-          <div class="document-name" role="cell">
-            <span class="file-icon" :class="`file-icon--${item.file_type.toLowerCase()}`"
-              ><FileText
-                v-if="item.file_type === 'MD' || item.file_type === 'TXT'"
-                :size="18" /><FileArchive v-else :size="18" /></span
-            ><span class="document-name__text"
-              ><strong>{{ item.filename }}</strong
-              ><small>{{ item.summary }}</small></span
-            >
-          </div>
-          <span class="document-category" role="cell">{{ item.category }}</span
-          ><span role="cell" class="status-badge" :class="`status-badge--${item.status}`"
-            ><i />{{ statusCopy(item.status) }}</span
-          ><span class="document-date" role="cell"
-            >{{ formatDate(item.created_at)
-            }}<small
-              >{{ formatSize(item.size_bytes)
-              }}{{ item.chunk_count ? ` 路 ${item.chunk_count} 涓墖娈礰 : "" }}</small
-            ></span
-          >
-          <div class="document-actions" role="cell">
-            <button class="row-menu" title="鏇村鎿嶄綔" aria-label="鏇村鎿嶄綔">
-              <MoreHorizontal :size="18" /></button
-            ><button
-              class="row-delete"
-              title="鍒犻櫎璧勬枡"
-              aria-label="鍒犻櫎璧勬枡"
-              @click="removeDocument(item.id)"
-            >
-              <Trash2 :size="16" />
-            </button>
-          </div>
+          <div class="document-name" role="cell"><span class="file-icon" :class="`file-icon--${item.file_type.toLowerCase()}`"><FileText v-if="item.file_type === 'MD' || item.file_type === 'TXT'" :size="18" /><FileArchive v-else :size="18" /></span><span class="document-name__text"><strong>{{ item.filename }}</strong><small>{{ item.summary }}</small></span></div>
+          <span class="document-category" role="cell">{{ item.category }}</span>
+          <span class="document-status" role="cell"><i />{{ statusCopy(item.status) }}</span>
+          <span class="document-date" role="cell">{{ formatDate(item.created_at) }}</span>
+          <button class="document-action" aria-label="删除资料" @click="removeDocument(item.id)"><Trash2 :size="16" /></button>
         </article>
       </div>
     </div>
