@@ -19,7 +19,52 @@ OPENAI_MODEL=
 INTENT_CONFIDENCE_THRESHOLD=0.75
 ```
 
-## 2. 完整流程图
+## 2. 目录与职责
+
+```text
+app/
+├── api/
+│   ├── routes.py             # FastAPI 查询入口、SSE 事件和资源边界
+│   ├── dependencies.py       # RequestContext、请求 ID 和访问策略注入
+│   └── response_mapper.py    # Graph State 到安全响应模型的映射
+├── graph/
+│   ├── builder.py            # StateGraph 构建、节点注册和条件路由
+│   ├── state.py              # NL2SQLState 与初始状态
+│   ├── intent_node.py        # 规则优先、LLM 兜底的意图分类
+│   ├── intent_rules.py       # 不访问数据库的高置信规则判断
+│   ├── generation_node.py    # 根据固定 Schema 生成只读 SQL
+│   ├── validation_node.py    # SQL AST、安全策略和白名单校验
+│   ├── execution_node.py     # 受限 SQLite 查询执行
+│   ├── general_answer_node.py # 非数据库问题的通用回答
+│   ├── clarification_node.py # 信息不足时的澄清问题
+│   ├── finalize_node.py      # 统一生成最终状态和用户说明
+│   └── repair_node.py        # 预留的 SQL 自动修复节点，当前未接入
+├── llm/
+│   ├── client.py             # LLMClient 协议和 ModelResponse
+│   ├── factory.py            # OpenAI 兼容 ChatModel 适配
+│   ├── prompts.py            # 意图、SQL、通用回答和澄清 Prompt
+│   ├── output_parser.py      # 模型 SQL 输出提取
+│   └── retry_policy.py       # LLM 超时和有限重试
+├── db/
+│   ├── base.py               # DatabaseExecutor 协议
+│   ├── sqlite_adapter.py     # Demo SQLite 只读适配器
+│   └── security_policy.py    # SQL AST 只读和访问策略校验
+└── tool/
+    └── database_query.py     # 可独立创建的数据库查询工具，当前 Graph 不自动调用
+
+tests/
+├── unit/test_graph.py        # Graph 节点和意图分支测试
+├── unit/test_sse.py          # SSE 事件顺序和响应测试
+└── fakes/fake_llm.py         # 离线模型替身
+
+web/src/
+├── api/client.ts             # 后端 HTTP/SSE 客户端
+├── types/api.ts              # 前端 API 和 SSE 类型
+└── views/QueryView.vue       # 查询聊天界面和流式进度展示
+```
+
+该目录说明只描述当前代码职责；`repair_node.py`、数据库工具、MySQL 适配器和 RAG 检索仍属于预留或未完整接入能力。
+## 3. 完整流程图
 
 ```mermaid
 flowchart TD
@@ -56,7 +101,7 @@ flowchart TD
     Z --> END
 ```
 
-## 3. Graph 节点与路由
+## 4. Graph 节点与路由
 
 [`app/graph/builder.py`](../app/graph/builder.py) 中的 `build_query_graph` 创建并编译以下图：
 
@@ -69,18 +114,18 @@ intent_gate
 
 | 节点 | 实现 | 作用 | 数据库/Schema 访问 |
 | --- | --- | --- | --- |
-| `intent_gate` | `make_intent_gate_node` | 规则优先，必要时调用无 Schema Prompt 将问题分类为三种意图 | 否 |
-| `retrieve_schema` | `SQLiteSchemaRetriever` | 读取允许访问的表、字段、主外键和 Schema 版本指纹 | 是，仅 `data_query` |
-| `generate_sql` | `make_generation_node` | 基于固定 Schema 生成单条只读 SQL | 否 |
-| `validate_sql` | `make_validation_node` | 执行 SQL AST、安全、表和字段白名单校验 | 否 |
-| `execute_sql` | `make_execution_node` | 只读连接、参数绑定、超时中断和结果格式化 | 是，仅 `data_query` |
-| `general_answer` | `make_general_answer_node` | 回答无需本地数据库的普通问题 | 否 |
-| `clarify` | `make_clarification_node` | 询问缺少的对象、指标、时间或筛选条件 | 否 |
-| `finalize` | `make_finalize_node` | 整理回答、查询结果或受控错误 | 否 |
+| `intent_gate` | [`intent_node.py`](../app/graph/intent_node.py) | 规则优先，必要时调用无 Schema Prompt 将问题分类为三种意图 | 否 |
+| `retrieve_schema` | [`builder.py`](../app/graph/builder.py) 中的 `SQLiteSchemaRetriever` | 读取允许访问的表、字段、主外键和 Schema 版本指纹 | 是，仅 `data_query` |
+| `generate_sql` | [`generation_node.py`](../app/graph/generation_node.py) | 基于固定 Schema 生成单条只读 SQL | 否 |
+| `validate_sql` | [`validation_node.py`](../app/graph/validation_node.py) | 执行 SQL AST、安全、表和字段白名单校验 | 否 |
+| `execute_sql` | [`execution_node.py`](../app/graph/execution_node.py) | 只读连接、参数绑定、超时中断和结果格式化 | 是，仅 `data_query` |
+| `general_answer` | [`general_answer_node.py`](../app/graph/general_answer_node.py) | 回答无需本地数据库的普通问题 | 否 |
+| `clarify` | [`clarification_node.py`](../app/graph/clarification_node.py) | 询问缺少的对象、指标、时间或筛选条件 | 否 |
+| `finalize` | [`finalize_node.py`](../app/graph/finalize_node.py) | 整理回答、查询结果或受控错误 | 否 |
 
-### 3.1 意图分类规则与 LLM 契约
+### 4.1 意图分类规则与 LLM 契约
 
-规则实现位于 [`app/graph/intent_rules.py`](../app/graph/intent_rules.py)，只使用问题文本中的高精度表达，不读取 Schema。明确命中规则时返回 `intent_source=rule`，避免不必要的模型调用；否则调用 [`app/llm/prompts.py`](../app/llm/prompts.py) 中的分类 Prompt，返回格式必须为：
+规则实现位于 [`intent_rules.py`](../app/graph/intent_rules.py)，只使用问题文本中的高精度表达，不读取 Schema。明确命中规则时返回 `intent_source=rule`，避免不必要的模型调用；否则调用 [`prompts.py`](../app/llm/prompts.py) 中的分类 Prompt，返回格式必须为：
 
 ```json
 {
@@ -101,19 +146,19 @@ intent_gate
 | `帮我看看数据` | `clarification` | 追问查询目标，不访问数据库 |
 | `订单情况怎么样？` | `clarification` | 追问指标、时间范围或筛选条件 |
 
-### 3.2 数据查询链路
+### 4.2 数据查询链路
 
 `retrieve_schema` 当前通过 `SQLiteSchemaRetriever` 直接读取当前数据库的完整 Schema，并生成版本指纹；尚未按问题做真正的 RAG 筛选。`generate_sql` 只接收问题、方言和 Schema，要求输出一条 `SELECT` 或最终只读的 `WITH` 查询。`validate_sql` 使用 AST 和服务端白名单检查单语句、只读操作、允许表和允许字段；不通过时将状态置为 `blocked`，不会调用执行器。
 
 `execute_sql` 仅执行已校验 SQL，使用只读连接、参数绑定、截止时间进度回调、结果行数上限和敏感字段脱敏。执行失败会写入稳定的错误分类和安全消息。当前 Graph 是“一次生成、一次校验、一次执行”，执行失败后的 SQL 自动修复节点尚未接入。
 
-### 3.3 数据库工具边界
+### 4.3 数据库工具边界
 
-[`app/db/sqlite_adapter.py`](../app/db/sqlite_adapter.py) 是当前 Graph 使用的实际数据库组件，只支持本地 `demo` SQLite。另有 [`app/db/tools.py`](../app/db/tools.py) 提供 LangChain `query_database` `StructuredTool` 适配器，可被模型调用，但当前 Graph 仍固定调用 `DatabaseExecutor`，不是由模型自主选择工具。MySQL 适配器文件存在，但尚未在 API 数据库编排中启用。
+[`sqlite_adapter.py`](../app/db/sqlite_adapter.py) 是当前 Graph 使用的实际数据库组件，只支持本地 `demo` SQLite。另有 [`database_query.py`](../app/tool/database_query.py) 提供 LangChain `query_database` `StructuredTool` 适配器，可被模型调用，但当前 Graph 仍固定调用 `DatabaseExecutor`，不是由模型自主选择工具。MySQL 适配器文件存在，但尚未在 API 数据库编排中启用。
 
-## 4. 状态与响应
+## 5. 状态与响应
 
-[`app/graph/state.py`](../app/graph/state.py) 的 `NL2SQLState` 在初始状态中保存请求标识、问题、数据库 ID、方言、轮次、最大轮次、Trace 和运行状态；节点按需追加：
+[`state.py`](../app/graph/state.py) 的 `NL2SQLState` 在初始状态中保存请求标识、问题、数据库 ID、方言、轮次、最大轮次、Trace 和运行状态；节点按需追加：
 
 - `intent`：三种受控意图之一；
 - `intent_confidence`：规则或 LLM 的置信度；
@@ -147,9 +192,9 @@ intent_gate
 }
 ```
 
-## 5. SSE 输出
+## 6. SSE 输出
 
-`POST /api/v1/query` 返回 `text/event-stream`。事件顺序通常为 `start`、多个 `progress`、最终 `complete`；未处理的模型、Schema 或执行异常返回 `error`。`progress` 会带节点名、状态、轮次、面向用户的解释；`intent_gate` 额外带 `intent`、`classification_valid`、`confidence`、`source` 和 `reason`。
+[`routes.py`](../app/api/routes.py) 中的 `POST /api/v1/query` 返回 `text/event-stream`。事件顺序通常为 `start`、多个 `progress`、最终 `complete`；未处理的模型、Schema 或执行异常返回 `error`。`progress` 会带节点名、状态、轮次、面向用户的解释；`intent_gate` 额外带 `intent`、`classification_valid`、`confidence`、`source` 和 `reason`。
 
 ### 数据查询示例
 
@@ -191,9 +236,9 @@ data: {"intent":"general_chat","status":"succeeded","result":null,"generated_sql
 
 前端 [`web/src/api/client.ts`](../web/src/api/client.ts) 使用 `fetch` 读取 POST SSE 流；[`web/src/views/QueryView.vue`](../web/src/views/QueryView.vue) 实时展示 Agent 当前步骤。只有 `intent=data_query` 时展示数据库、结果表和 SQL 相关信息，通用回答和澄清仅展示回答内容及意图标签。
 
-## 6. API 与资源边界
+## 7. API 与资源边界
 
-[`app/api/routes.py`](../app/api/routes.py) 在创建 Graph 前执行：
+[`routes.py`](../app/api/routes.py) 在创建 Graph 前执行：
 
 1. 校验 `question`、`database_id` 和可选的 `max_iterations`（请求长度和范围由 Pydantic 约束）。
 2. 根据请求上下文检查服务端数据库白名单。
@@ -204,7 +249,7 @@ data: {"intent":"general_chat","status":"succeeded","result":null,"generated_sql
 
 非数据分支虽然可能调用通用 LLM，但不会把 Schema、数据库路径或数据库结果放入 Prompt。数据库连接对象只作为 Graph 依赖存在，实际 Schema 和执行方法不会被这些分支调用。
 
-## 7. 错误处理与安全边界
+## 8. 错误处理与安全边界
 
 | 场景 | 处理 |
 | --- | --- |
@@ -218,7 +263,7 @@ data: {"intent":"general_chat","status":"succeeded","result":null,"generated_sql
 
 SQL 执行前还会进行单语句、只读、表/字段白名单和 AST 检查；执行使用只读连接、超时、行数限制、参数绑定及结果脱敏。原始异常不会写入公共响应。
 
-## 8. 意图分类准确率评测
+## 9. 意图分类准确率评测
 
 为规则和 LLM 兜底分类建立了可重复的 50 条固定标注集：
 
@@ -250,7 +295,7 @@ SQL 执行前还会进行单语句、只读、表/字段白名单和 AST 检查�
 .\.venv\Scripts\python.exe scripts/evaluate_intent.py --threshold 0.80
 ```
 
-## 9. 测试与验证
+## 10. 测试与验证
 
 测试使用可按顺序返回响应的 `FakeLLM`，并使用拒绝数据库访问的替身验证路由边界，覆盖：
 
@@ -276,13 +321,13 @@ node node_modules/vite/bin/vite.js build
 
 前端构建需在本地依赖完整时单独验证；本说明不把未实际运行的构建结果标记为通过。
 
-## 10. 当前边界与后续工作
+## 11. 当前边界与后续工作
 
 - 当前按单条用户消息进行意图判断，尚未把多轮聊天历史传入分类和回答 Prompt；“那上个月呢”需要后续上下文能力。
 - 当前 `data_query` 是一次生成、一次校验、一次执行；`app/graph/repair_node.py` 仍是空壳，SQL 执行失败后的自动修复闭环尚未接入。
 - `SQLiteSchemaRetriever` 直接返回完整 Schema，尚未按问题实现真正的 RAG 筛选、混合检索和重排；相关 `app/rag` 模块不代表该 Graph 已完成接线。
 - 当前 API 只编排本地 `demo` SQLite；MySQL 等其他数据库适配器尚未接入数据库 ID 路由。
-- [`app/db/tools.py`](../app/db/tools.py) 的 LangChain `query_database` 工具可独立创建，但 Graph 当前不采用模型自主工具调用。
+- [`app/tool/database_query.py`](../app/tool/database_query.py) 的 LangChain `query_database` 工具可独立创建，但 Graph 当前不采用模型自主工具调用。
 - `trace` 是预留的可展示节点摘要字段；SSE 有实时进度，但完整节点耗时尚未持久化为 TraceEvent。
 - 通用问答模型不具备实时天气或外部系统访问能力，不应把通用回答解释为实时事实查询。
 - 意图评测集是可重复基准，不代表生产流量分布；生产上线前仍需扩展多轮、否定表达、同音词、领域术语和对抗输入样例。

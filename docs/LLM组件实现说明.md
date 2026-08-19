@@ -1,12 +1,36 @@
 # LLM 组件实现说明
 
-## 目标
+## 1. 目标
 
 `app/llm` 将 LangChain ChatModel 适配为项目内部稳定的 `LLMClient` 协议。Graph 节点只依赖统一的 Prompt 输入与 `ModelResponse` 输出，不直接依赖 OpenAI、DeepSeek 或 Qwen 的 SDK。
 
-当前组件只负责模型调用、Prompt 构建、重试和响应归一化。它不会连接数据库、执行 SQL、修改 LangGraph State，也不会改变 `/api/v1/query` 现有的 `501` 行为。
+当前组件只负责模型调用、Prompt 构建、重试和响应归一化。它不会连接数据库、执行 SQL、修改 LangGraph State，也不会绕过当前 `/api/v1/query` 的意图分流和 SSE 查询链路。
 
-## 配置
+## 2. 目录与职责
+
+```text
+app/
+├── llm/
+│   ├── client.py          # LLMClient 协议和 ModelResponse 统一响应模型
+│   ├── factory.py         # ChatOpenAI/OpenAI 兼容客户端、配置校验和调用适配
+│   ├── prompts.py         # 意图分类、通用回答、澄清、SQL 生成和 SQL 修复 Prompt
+│   ├── output_parser.py   # 提取并规范化模型生成的 SQL
+│   └── retry_policy.py    # LLM 超时预算、临时故障识别和有限重试
+├── graph/
+│   ├── intent_node.py     # 规则优先、LLM 兜底的意图分类
+│   ├── general_answer_node.py # 非数据库问题的通用回答
+│   ├── clarification_node.py  # 数据问题信息不足时的澄清回答
+│   └── generation_node.py # 根据 Schema 生成只读 SQL
+└── config/
+    └── settings.py        # API Key、Base URL、模型和超时配置
+
+tests/
+├── fakes/fake_llm.py      # 不访问网络的 Fake LLM
+└── unit/test_llm.py       # 客户端、Prompt、输出解析和重试策略测试
+```
+
+LLM 组件只负责 Prompt 构建、模型调用、输出解析和有限重试；它不直接连接数据库、不执行 SQL、不修改 Graph State，也不绕过 SQL 安全策略。`graph/` 下的节点负责把 LLM 组件接入工作流并决定后续分支。
+## 3. 配置
 
 在项目根目录创建 `.env`，填写真实服务配置：
 
@@ -24,7 +48,7 @@ OPENAI_MODEL=your-model-name
 
 `Settings` 将空字符串视为未配置。服务启动和健康检查不要求模型凭证；只有创建真实 `OpenAIChatClient` 时才会验证 `OPENAI_API_KEY` 与 `OPENAI_MODEL`。
 
-## 统一接口
+## 4. 统一接口
 
 [`app/llm/client.py`](../app/llm/client.py) 定义以下稳定边界：
 
@@ -37,16 +61,16 @@ class LLMClient(Protocol):
 - `ModelResponse` 只包含模型返回文本与模型标识，不暴露供应商响应对象或原始元数据。
 - 测试可使用 `tests/fakes/fake_llm.py` 中的 `FakeLLM`，不需要网络或真实密钥。
 
-## Prompt
+## 5. Prompt
 
-[`app/llm/prompts.py`](../app/llm/prompts.py) 提供两个 `ChatPromptTemplate`：
+[`app/llm/prompts.py`](../app/llm/prompts.py) 提供意图、通用回答、澄清、SQL 生成和 SQL 修复等 `ChatPromptTemplate`：
 
 - `build_sql_generation_prompt()`：首次根据问题、数据库方言与 Schema 上下文生成 SQL。
 - `build_sql_repair_prompt()`：根据原问题、固定 Schema、失败 SQL 与已脱敏错误信息修复 SQL。
 
 两个模板都要求模型只输出一条只读 SQL，不包含 Markdown 围栏、解释、注释、分号、多语句、写操作、DDL 或管理命令。Prompt 约束不是安全边界，模型输出仍必须经过 `output_parser.py` 和后续 SQL AST 安全校验。
 
-## 调用与重试
+## 6. 调用与重试
 
 [`app/llm/factory.py`](../app/llm/factory.py) 使用 `ChatOpenAI` 创建 OpenAI 兼容客户端：
 
@@ -62,7 +86,7 @@ class LLMClient(Protocol):
 - 退避时间为 `0.25s`、`0.5s`，且不会超出调用总时间预算。
 - 认证、请求参数、模型名称和模型输出错误不会重试，交由上层错误分类处理。
 
-## 集成方式
+## 7. 集成方式
 
 后续 Graph 节点应先填充 Prompt，再调用客户端：
 
@@ -79,7 +103,7 @@ response = client.generate(prompt, timeout_seconds=settings.query_timeout_second
 
 修复节点应使用 `build_sql_repair_prompt()`，并且只传入已经脱敏的数据库错误信息。节点收到 `response.content` 后必须调用 `extract_sql`，再交给 SQL 安全策略校验；不得绕过只读校验直接执行模型输出。
 
-## 测试
+## 8. 测试
 
 [`tests/unit/test_llm.py`](../tests/unit/test_llm.py) 覆盖：
 
