@@ -1,5 +1,7 @@
 export type QueryStatus = "running" | "succeeded" | "blocked" | "failed";
 
+export type QueryIntent = "data_query" | "general_chat" | "clarification";
+
 export type ErrorCategory =
   | "syntax_error"
   | "unknown_column"
@@ -50,6 +52,7 @@ export interface KnowledgeHit {
 
 export interface QueryResponse {
   request_id: string;
+  intent: QueryIntent;
   status: QueryStatus;
   iteration: number;
   error_category?: ErrorCategory | null;
@@ -76,6 +79,8 @@ export interface QueryStreamEvent {
   sql?: string;
   validated?: boolean;
   row_count?: number;
+  intent?: QueryIntent;
+  classification_valid?: boolean;
 }
 
 export interface DatabaseListResponse {

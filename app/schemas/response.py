@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from app.schemas.domain import ErrorCategory, QueryResult, QueryStatus, TraceEvent
+from app.schemas.domain import ErrorCategory, QueryIntent, QueryResult, QueryStatus, TraceEvent
 
 
 class QueryResponse(BaseModel):
     """查询接口的统一响应，不包含原始异常或未授权 SQL。"""
 
     request_id: str
+    intent: QueryIntent
     status: QueryStatus
     iteration: int
     error_category: ErrorCategory | None = None

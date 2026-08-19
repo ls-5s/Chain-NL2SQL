@@ -17,6 +17,14 @@ class QueryStatus(str, Enum):
     FAILED = "failed"
 
 
+class QueryIntent(str, Enum):
+    """The safe routing outcome produced before any database access."""
+
+    DATA_QUERY = "data_query"
+    GENERAL_CHAT = "general_chat"
+    CLARIFICATION = "clarification"
+
+
 class ErrorCategory(str, Enum):
     """可安全返回给调用方的稳定错误分类。"""
 

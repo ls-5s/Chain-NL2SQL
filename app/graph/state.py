@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import NotRequired, TypedDict
 
-from app.schemas.domain import ErrorCategory, QueryResult, QueryStatus, SchemaDocument, TraceEvent
+from app.schemas.domain import ErrorCategory, QueryIntent, QueryResult, QueryStatus, SchemaDocument, TraceEvent
 
 
 class NL2SQLState(TypedDict):
@@ -20,6 +20,8 @@ class NL2SQLState(TypedDict):
     status: QueryStatus
     # 以下字段由对应节点按需追加，路由前必须检查其是否存在。
     schema_version: NotRequired[str]
+    intent: NotRequired[QueryIntent]
+    intent_classification_valid: NotRequired[bool]
     schema_context: NotRequired[list[SchemaDocument]]
     generated_sql: NotRequired[str]
     validated_sql: NotRequired[str]

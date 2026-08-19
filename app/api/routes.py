@@ -94,6 +94,9 @@ async def _stream_graph(graph: Any, state: NL2SQLState, database: SQLiteAdapter)
                 }
                 if node == "retrieve_schema":
                     progress["retrieved_document_count"] = len(current_state.get("schema_context", []))
+                if node == "intent_gate":
+                    progress["intent"] = _json_value(current_state.get("intent"))
+                    progress["classification_valid"] = current_state.get("intent_classification_valid", False)
                 if current_state.get("error_category"):
                     progress["error_category"] = _json_value(current_state["error_category"])
                 if node == "retrieve_schema":
@@ -128,15 +131,27 @@ def _json_value(value: Any) -> Any:
 
 def _node_message(node: str) -> str:
     return {
+        "intent_gate": "正在理解问题并判断处理方式",
         "retrieve_schema": "正在读取数据库 Schema",
         "generate_sql": "正在生成只读 SQL",
         "validate_sql": "正在校验 SQL 安全性",
         "execute_sql": "正在执行查询",
+        "general_answer": "正在生成通用回答",
+        "clarify": "正在确认查询目标",
         "finalize": "正在整理查询结果",
     }.get(node, "正在处理查询")
 
 
 def _node_explanation(node: str, state: dict[str, Any]) -> str:
+    if node == "intent_gate":
+        intent = _json_value(state.get("intent"))
+        if intent == "data_query":
+            return "问题明确需要本地业务数据，将进入受控 NL2SQL 流程。"
+        if intent == "general_chat":
+            return "问题不需要本地业务数据，将交由通用问答模型处理。"
+        if state.get("intent_classification_valid") is False:
+            return "模型分类结果无效，已保守转入查询目标澄清，不访问数据库。"
+        return "问题可能与数据有关但查询目标不完整，将先请求补充信息。"
     if node == "retrieve_schema":
         count = len(state.get("schema_context", []))
         return f"读取服务端允许访问的 Schema，共获得 {count} 张表的结构信息。"
@@ -151,6 +166,10 @@ def _node_explanation(node: str, state: dict[str, Any]) -> str:
         if result:
             return f"在超时和结果行数限制内执行 SQL，返回 {result.row_count} 行。"
         return "执行已验证的只读 SQL。"
+    if node == "general_answer":
+        return "使用通用问答模型回答，不读取 Schema 或访问数据库。"
+    if node == "clarify":
+        return "使用模型生成需要补充的信息，不读取 Schema 或访问数据库。"
     if node == "finalize":
         return "整理安全响应，不向客户端暴露原始异常或连接信息。"
     return "执行查询工作流。"

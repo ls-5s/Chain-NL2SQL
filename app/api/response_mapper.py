@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.schemas.domain import ErrorCategory, QueryStatus
+from app.schemas.domain import ErrorCategory, QueryIntent, QueryStatus
 from app.schemas.response import QueryResponse
 
 
@@ -15,8 +15,12 @@ def map_query_state(state: dict[str, Any]) -> QueryResponse:
     category = state.get("error_category")
     if category is not None and not isinstance(category, ErrorCategory):
         category = ErrorCategory(category)
+    intent = state.get("intent", QueryIntent.CLARIFICATION)
+    if not isinstance(intent, QueryIntent):
+        intent = QueryIntent(intent)
     return QueryResponse(
         request_id=state["request_id"],
+        intent=intent,
         status=status,
         iteration=state.get("iteration", 0),
         error_category=category,
