@@ -16,5 +16,7 @@ def validate_settings(settings: Settings) -> None:
         raise ValueError("QUERY_TIMEOUT_SECONDS must be positive.")
     if settings.result_row_limit <= 0:
         raise ValueError("RESULT_ROW_LIMIT must be positive.")
+    if not 0.0 < settings.intent_confidence_threshold <= 1.0:
+        raise ValueError("INTENT_CONFIDENCE_THRESHOLD must be between 0 and 1.")
     if not settings.allowed_database_ids:
         raise ValueError("At least one database id must be configured.")

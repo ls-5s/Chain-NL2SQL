@@ -53,6 +53,9 @@ export interface KnowledgeHit {
 export interface QueryResponse {
   request_id: string;
   intent: QueryIntent;
+  intent_confidence?: number | null;
+  intent_reason?: string | null;
+  intent_source?: "rule" | "llm" | null;
   status: QueryStatus;
   iteration: number;
   error_category?: ErrorCategory | null;
@@ -81,6 +84,9 @@ export interface QueryStreamEvent {
   row_count?: number;
   intent?: QueryIntent;
   classification_valid?: boolean;
+  confidence?: number;
+  source?: "rule" | "llm";
+  reason?: string;
 }
 
 export interface DatabaseListResponse {

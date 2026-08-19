@@ -136,12 +136,30 @@ async function scrollToBottom() {
         <h1>今天想查询什么？</h1>
         <p>查询演示数据或直接提问，系统会判断是否需要生成只读 SQL。</p>
         <div class="suggestion-list">
-          <button type="button" @click="askQuestion('查询用户数量')">查询用户数量</button>
-          <button type="button" @click="askQuestion('统计各类商品的销售情况')">统计各类商品的销售情况</button>
-          <button type="button" @click="askQuestion('查询最近的订单')">查询最近的订单</button>
-          <button type="button" @click="askQuestion('按订单状态统计订单数量')">按状态统计订单</button>
-          <button type="button" @click="askQuestion('帮我写一封会议邀请邮件')">帮我写一封会议邀请邮件</button>
-          <button type="button" @click="askQuestion('订单情况怎么样？')">订单情况怎么样？</button>
+          <button type="button" @click="askQuestion('查询用户数量')">
+            <span class="suggestion-copy">查询用户数量</span>
+            <span class="suggestion-type suggestion-type--data">数据查询</span>
+          </button>
+          <button type="button" @click="askQuestion('统计各类商品的销售情况')">
+            <span class="suggestion-copy">统计各类商品的销售情况</span>
+            <span class="suggestion-type suggestion-type--data">数据查询</span>
+          </button>
+          <button type="button" @click="askQuestion('查询最近的订单')">
+            <span class="suggestion-copy">查询最近的订单</span>
+            <span class="suggestion-type suggestion-type--data">数据查询</span>
+          </button>
+          <button type="button" @click="askQuestion('按订单状态统计订单数量')">
+            <span class="suggestion-copy">按状态统计订单</span>
+            <span class="suggestion-type suggestion-type--data">数据查询</span>
+          </button>
+          <button type="button" @click="askQuestion('帮我写一封会议邀请邮件')">
+            <span class="suggestion-copy">帮我写一封会议邀请邮件</span>
+            <span class="suggestion-type suggestion-type--general">通用问答</span>
+          </button>
+          <button type="button" @click="askQuestion('订单情况怎么样？')">
+            <span class="suggestion-copy">订单情况怎么样？</span>
+            <span class="suggestion-type suggestion-type--clarification">需补充信息</span>
+          </button>
         </div>
       </div>
 
@@ -247,8 +265,13 @@ async function scrollToBottom() {
 .empty-state h1 { margin: 0; color: #202020; font-size: 30px; font-weight: 650; letter-spacing: 0; }
 .empty-state p { max-width: 480px; margin: 11px 0 25px; color: #777; font-size: 14px; line-height: 1.6; }
 .suggestion-list { display: grid; width: min(580px, 100%); grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
-.suggestion-list button { min-height: 44px; border: 1px solid #e5e5e5; border-radius: 9px; padding: 10px 13px; color: #424242; background: #fff; font: inherit; font-size: 13px; text-align: left; cursor: pointer; transition: background .15s, border-color .15s; }
+.suggestion-list button { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid #e5e5e5; border-radius: 9px; padding: 10px 13px; color: #424242; background: #fff; font: inherit; font-size: 13px; text-align: left; cursor: pointer; transition: background .15s, border-color .15s; }
 .suggestion-list button:hover { border-color: #cfcfcf; background: #f8f8f8; }
+.suggestion-copy { min-width: 0; overflow-wrap: anywhere; }
+.suggestion-type { flex: 0 0 auto; border-radius: 6px; padding: 3px 6px; font-size: 11px; line-height: 1.2; white-space: nowrap; }
+.suggestion-type--data { color: #245b8a; background: #edf5fb; }
+.suggestion-type--general { color: #2f6b4f; background: #edf8f1; }
+.suggestion-type--clarification { color: #8a5b20; background: #fff5e6; }
 .message-list { display: flex; flex-direction: column; gap: 25px; width: 100%; padding: 22px 0 140px; }
 .message-row { display: flex; gap: 12px; align-items: flex-start; }
 .message-row--user { flex-direction: row-reverse; }

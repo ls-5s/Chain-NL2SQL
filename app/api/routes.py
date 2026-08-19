@@ -51,6 +51,7 @@ async def query(
             schema_retriever=SQLiteSchemaRetriever(database),
             access_policy=context.access_policy,
             query_timeout_seconds=settings.query_timeout_seconds,
+            intent_confidence_threshold=settings.intent_confidence_threshold,
         )
     except LLMConfigurationError as error:
         database.close()
@@ -97,6 +98,9 @@ async def _stream_graph(graph: Any, state: NL2SQLState, database: SQLiteAdapter)
                 if node == "intent_gate":
                     progress["intent"] = _json_value(current_state.get("intent"))
                     progress["classification_valid"] = current_state.get("intent_classification_valid", False)
+                    progress["confidence"] = current_state.get("intent_confidence")
+                    progress["source"] = current_state.get("intent_source")
+                    progress["reason"] = current_state.get("intent_reason")
                 if current_state.get("error_category"):
                     progress["error_category"] = _json_value(current_state["error_category"])
                 if node == "retrieve_schema":
@@ -146,11 +150,12 @@ def _node_explanation(node: str, state: dict[str, Any]) -> str:
     if node == "intent_gate":
         intent = _json_value(state.get("intent"))
         if intent == "data_query":
-            return "问题明确需要本地业务数据，将进入受控 NL2SQL 流程。"
+            source = state.get("intent_source", "llm")
+            return f"问题明确需要本地业务数据（{source} 判断），将进入受控 NL2SQL 流程。"
         if intent == "general_chat":
             return "问题不需要本地业务数据，将交由通用问答模型处理。"
         if state.get("intent_classification_valid") is False:
-            return "模型分类结果无效，已保守转入查询目标澄清，不访问数据库。"
+            return "分类置信度不足或格式无效，已保守转入查询目标澄清，不访问数据库。"
         return "问题可能与数据有关但查询目标不完整，将先请求补充信息。"
     if node == "retrieve_schema":
         count = len(state.get("schema_context", []))

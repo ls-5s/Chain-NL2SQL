@@ -55,7 +55,6 @@ def initial_state(question: str):
 def test_data_intent_retrieves_schema_generates_and_executes_sql() -> None:
     adapter = SQLiteAdapter("demo", str(ROOT / "data" / "demo.sqlite"))
     llm = FakeLLM([
-        '{"intent":"data_query"}',
         "SELECT COUNT(*) AS count FROM users",
     ])
     graph = build_query_graph(
@@ -72,12 +71,13 @@ def test_data_intent_retrieves_schema_generates_and_executes_sql() -> None:
     assert state["status"] == "succeeded"
     assert state["query_result"].rows == [[3]]
     assert state["final_answer"] == "查询完成，共返回 1 行结果。"
-    assert len(llm.prompts) == 2
+    assert len(llm.prompts) == 1
+    assert state["intent_source"] == "rule"
 
 
 @pytest.mark.parametrize("question", ["你好", "今天天气怎么样", "帮我写一封邮件"])
 def test_general_chat_uses_llm_without_schema_or_sql_access(question: str) -> None:
-    llm = FakeLLM(['{"intent":"general_chat"}', "你好，有什么可以帮你？"])
+    llm = FakeLLM(["你好，有什么可以帮你？"])
     graph = build_query_graph(
         database_executor=UnexpectedDatabaseAccess(),
         llm_client=llm,
@@ -92,11 +92,12 @@ def test_general_chat_uses_llm_without_schema_or_sql_access(question: str) -> No
     assert state["status"] == "succeeded"
     assert state["final_answer"] == "你好，有什么可以帮你？"
     assert "generated_sql" not in state
-    assert len(llm.prompts) == 2
+    assert len(llm.prompts) == 1
+    assert state["intent_source"] == "rule"
 
 
 def test_ambiguous_question_uses_llm_clarification_without_database_access() -> None:
-    llm = FakeLLM(['{"intent":"clarification"}', "请说明要查看的指标、时间范围和筛选条件。"])
+    llm = FakeLLM(["请说明要查看的指标、时间范围和筛选条件。"])
     graph = build_query_graph(
         database_executor=UnexpectedDatabaseAccess(),
         llm_client=llm,
@@ -109,7 +110,8 @@ def test_ambiguous_question_uses_llm_clarification_without_database_access() -> 
 
     assert state["intent"] == QueryIntent.CLARIFICATION
     assert state["final_answer"] == "请说明要查看的指标、时间范围和筛选条件。"
-    assert len(llm.prompts) == 2
+    assert len(llm.prompts) == 1
+    assert state["intent_source"] == "rule"
 
 
 def test_invalid_intent_json_conservatively_uses_clarification() -> None:
@@ -122,8 +124,25 @@ def test_invalid_intent_json_conservatively_uses_clarification() -> None:
         query_timeout_seconds=15,
     )
 
-    state = graph.invoke(initial_state("订单情况"))
+    state = graph.invoke(initial_state("这个事情怎么处理"))
 
     assert state["intent"] == QueryIntent.CLARIFICATION
     assert state["intent_classification_valid"] is False
     assert state["final_answer"] == "请说明需要查询的业务对象和时间范围。"
+
+
+def test_low_confidence_intent_conservatively_clarifies() -> None:
+    llm = FakeLLM(['{"intent":"data_query","confidence":0.4,"reason":"不确定"}', "请补充查询对象。"])
+    graph = build_query_graph(
+        database_executor=UnexpectedDatabaseAccess(),
+        llm_client=llm,
+        schema_retriever=UnexpectedRetriever(),
+        access_policy=policy(),
+        query_timeout_seconds=15,
+    )
+
+    state = graph.invoke(initial_state("帮我看一下情况"))
+
+    assert state["intent"] == QueryIntent.CLARIFICATION
+    assert state["intent_source"] == "llm"
+    assert state["intent_classification_valid"] is False

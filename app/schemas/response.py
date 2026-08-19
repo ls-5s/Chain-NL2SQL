@@ -12,6 +12,9 @@ class QueryResponse(BaseModel):
 
     request_id: str
     intent: QueryIntent
+    intent_confidence: float | None = None
+    intent_reason: str | None = None
+    intent_source: str | None = None
     status: QueryStatus
     iteration: int
     error_category: ErrorCategory | None = None

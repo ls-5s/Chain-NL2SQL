@@ -56,7 +56,7 @@ def test_sse_data_path_emits_expected_events() -> None:
     database = SQLiteAdapter("demo", str(ROOT / "data" / "demo.sqlite"))
     graph = build_query_graph(
         database_executor=database,
-        llm_client=FakeLLM(['{"intent":"data_query"}', "SELECT COUNT(*) AS count FROM users"]),
+        llm_client=FakeLLM(["SELECT COUNT(*) AS count FROM users"]),
         schema_retriever=SQLiteSchemaRetriever(database),
         access_policy=policy(),
         query_timeout_seconds=15,
@@ -74,7 +74,7 @@ def test_sse_general_path_skips_database_nodes() -> None:
     database = SQLiteAdapter("demo", str(ROOT / "data" / "demo.sqlite"))
     graph = build_query_graph(
         database_executor=database,
-        llm_client=FakeLLM(['{"intent":"general_chat"}', "你好，有什么可以帮你？"]),
+        llm_client=FakeLLM(["你好，有什么可以帮你？"]),
         schema_retriever=SQLiteSchemaRetriever(database),
         access_policy=policy(),
         query_timeout_seconds=15,
@@ -91,7 +91,7 @@ def test_sse_clarification_path_skips_database_nodes() -> None:
     database = SQLiteAdapter("demo", str(ROOT / "data" / "demo.sqlite"))
     graph = build_query_graph(
         database_executor=database,
-        llm_client=FakeLLM(['{"intent":"clarification"}', "请补充时间范围。"]),
+        llm_client=FakeLLM(["请补充时间范围。"]),
         schema_retriever=SQLiteSchemaRetriever(database),
         access_policy=policy(),
         query_timeout_seconds=15,
@@ -114,7 +114,7 @@ def test_sse_model_failure_emits_error_event() -> None:
         query_timeout_seconds=15,
     )
 
-    result = events(run_stream(graph, state("你好"), database))
+    result = events(run_stream(graph, state("这个事情怎么处理"), database))
 
     assert [name for name, _ in result] == ["start", "error"]
     assert result[-1][1]["status_code"] == 502

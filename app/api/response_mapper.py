@@ -21,6 +21,9 @@ def map_query_state(state: dict[str, Any]) -> QueryResponse:
     return QueryResponse(
         request_id=state["request_id"],
         intent=intent,
+        intent_confidence=state.get("intent_confidence"),
+        intent_reason=state.get("intent_reason"),
+        intent_source=state.get("intent_source"),
         status=status,
         iteration=state.get("iteration", 0),
         error_category=category,

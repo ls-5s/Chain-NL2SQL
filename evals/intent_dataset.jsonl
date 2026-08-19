@@ -1,0 +1,50 @@
+{"question":"查询用户总数","expected_intent":"data_query","category":"clear_data","reason":"明确查询用户数量"}
+{"question":"统计所有订单的数量","expected_intent":"data_query","category":"clear_data","reason":"明确统计订单数量"}
+{"question":"本月订单总金额是多少？","expected_intent":"data_query","category":"clear_data","reason":"明确查询时间范围和金额指标"}
+{"question":"列出价格最高的五个商品","expected_intent":"data_query","category":"clear_data","reason":"明确排行和返回数量"}
+{"question":"查询 Alice 的所有订单","expected_intent":"data_query","category":"clear_data","reason":"明确按用户筛选订单"}
+{"question":"平均每笔订单的金额是多少？","expected_intent":"data_query","category":"clear_data","reason":"明确聚合指标"}
+{"question":"按订单状态统计订单数量","expected_intent":"data_query","category":"clear_data","reason":"明确分组统计"}
+{"question":"查看最近七天的订单趋势","expected_intent":"data_query","category":"clear_data","reason":"明确时间范围和趋势分析"}
+{"question":"销量最高的商品有哪些？","expected_intent":"data_query","category":"clear_data","reason":"明确销量排行"}
+{"question":"比较不同商品类别的销售金额","expected_intent":"data_query","category":"clear_data","reason":"明确比较分析指标"}
+{"question":"查询今年创建的用户","expected_intent":"data_query","category":"clear_data","reason":"明确用户筛选条件"}
+{"question":"统计每个客户的订单数","expected_intent":"data_query","category":"clear_data","reason":"明确按客户聚合订单"}
+{"question":"找出订单金额超过 300 的订单","expected_intent":"data_query","category":"clear_data","reason":"明确数值筛选条件"}
+{"question":"查询商品分类和商品数量","expected_intent":"data_query","category":"clear_data","reason":"明确查询字段和数量指标"}
+{"question":"列出状态为已支付的订单","expected_intent":"data_query","category":"clear_data","reason":"明确状态筛选"}
+{"question":"分析每个月的销售总额","expected_intent":"data_query","category":"clear_data","reason":"明确时间聚合和金额指标"}
+{"question":"查询订单和对应的用户名","expected_intent":"data_query","category":"clear_data","reason":"明确关联查询目标"}
+{"question":"统计每种商品的销售数量","expected_intent":"data_query","category":"clear_data","reason":"明确商品维度和数量指标"}
+{"question":"查询最早注册的十位用户","expected_intent":"data_query","category":"clear_data","reason":"明确排序和返回数量"}
+{"question":"计算所有订单的平均金额和总金额","expected_intent":"data_query","category":"clear_data","reason":"明确两个聚合指标"}
+{"question":"你好，今天过得怎么样？","expected_intent":"general_chat","category":"general_chat","reason":"普通问候交流"}
+{"question":"帮我写一封会议邀请邮件","expected_intent":"general_chat","category":"general_chat","reason":"写作请求，不需要业务数据"}
+{"question":"今天天气怎么样？","expected_intent":"general_chat","category":"general_chat","reason":"外部常识问题，不查询本地数据库"}
+{"question":"请把这句话翻译成英文：欢迎参加会议","expected_intent":"general_chat","category":"general_chat","reason":"翻译请求"}
+{"question":"什么是机器学习？","expected_intent":"general_chat","category":"general_chat","reason":"通用知识问答"}
+{"question":"谢谢你的帮助","expected_intent":"general_chat","category":"general_chat","reason":"礼貌交流"}
+{"question":"帮我润色这段自我介绍","expected_intent":"general_chat","category":"general_chat","reason":"写作润色请求"}
+{"question":"如何学习 Python？","expected_intent":"general_chat","category":"general_chat","reason":"通用学习建议"}
+{"question":"解释一下 REST API 是什么","expected_intent":"general_chat","category":"general_chat","reason":"技术概念解释"}
+{"question":"给我讲一个睡前故事","expected_intent":"general_chat","category":"general_chat","reason":"创作请求"}
+{"question":"帮我制定一份健身计划","expected_intent":"general_chat","category":"general_chat","reason":"通用建议请求"}
+{"question":"把这段中文改得更正式一些","expected_intent":"general_chat","category":"general_chat","reason":"文本改写请求"}
+{"question":"你能推荐几本入门书吗？","expected_intent":"general_chat","category":"general_chat","reason":"通用推荐问题"}
+{"question":"为什么天空是蓝色的？","expected_intent":"general_chat","category":"general_chat","reason":"通用知识问题"}
+{"question":"帮我检查这段代码的语法","expected_intent":"general_chat","category":"general_chat","reason":"代码辅助请求，不需要业务数据库"}
+{"question":"订单情况怎么样？","expected_intent":"clarification","category":"ambiguous","reason":"缺少具体指标和时间范围"}
+{"question":"帮我看看这个月的情况","expected_intent":"clarification","category":"ambiguous","reason":"缺少业务对象和指标"}
+{"question":"查一下 Alice","expected_intent":"clarification","category":"ambiguous","reason":"缺少要查询的数据对象和指标"}
+{"question":"用户表现如何？","expected_intent":"clarification","category":"ambiguous","reason":"缺少表现指标和时间范围"}
+{"question":"商品销售如何？","expected_intent":"clarification","category":"ambiguous","reason":"缺少具体销售指标和时间范围"}
+{"question":"帮我查一下","expected_intent":"clarification","category":"ambiguous","reason":"完全缺少查询对象和指标"}
+{"question":"业务表现怎么样？","expected_intent":"clarification","category":"ambiguous","reason":"业务范围和指标不明确"}
+{"question":"看看订单","expected_intent":"clarification","category":"ambiguous","reason":"缺少查看字段、指标和筛选条件"}
+{"question":"分析一下用户","expected_intent":"clarification","category":"ambiguous","reason":"缺少分析指标和时间范围"}
+{"question":"查询数据","expected_intent":"clarification","category":"ambiguous","reason":"只有泛化对象，没有具体指标"}
+{"question":"这个月销售怎么样","expected_intent":"clarification","category":"ambiguous","reason":"缺少销售指标和统计口径"}
+{"question":"给我一些订单信息","expected_intent":"clarification","category":"ambiguous","reason":"缺少具体字段和筛选条件"}
+{"question":"看看 Alice 的情况","expected_intent":"clarification","category":"ambiguous","reason":"缺少数据对象、指标和时间范围"}
+{"question":"帮我总结一下","expected_intent":"clarification","category":"ambiguous","reason":"缺少总结对象和范围"}
+{"question":"订单数量如何","expected_intent":"clarification","category":"ambiguous","reason":"缺少时间范围和筛选条件"}

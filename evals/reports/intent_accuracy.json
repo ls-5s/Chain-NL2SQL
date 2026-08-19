@@ -1,0 +1,72 @@
+{
+  "config": {
+    "threshold": 0.75,
+    "timeout_seconds": 15.0
+  },
+  "total": 50,
+  "correct": 49,
+  "accuracy": 0.98,
+  "per_class": {
+    "data_query": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 20
+    },
+    "general_chat": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 15
+    },
+    "clarification": {
+      "precision": 1.0,
+      "recall": 0.9333,
+      "f1": 0.9655,
+      "support": 15
+    }
+  },
+  "confusion_matrix": {
+    "data_query": {
+      "data_query": 20,
+      "general_chat": 0,
+      "clarification": 0,
+      "error": 0
+    },
+    "general_chat": {
+      "data_query": 0,
+      "general_chat": 15,
+      "clarification": 0,
+      "error": 0
+    },
+    "clarification": {
+      "data_query": 0,
+      "general_chat": 0,
+      "clarification": 14,
+      "error": 1
+    }
+  },
+  "rule_hit_rate": 0.98,
+  "llm_fallback_rate": 0.02,
+  "provider_error_count": 1,
+  "llm_call_count": 1,
+  "invalid_or_low_confidence_count": 0,
+  "data_query_false_positive_count": 0,
+  "data_query_false_positive_rate": 0.0,
+  "mean_latency_ms": 33.78,
+  "completed_accuracy": 1.0,
+  "errors": [
+    {
+      "question": "业务表现怎么样？",
+      "expected_intent": "clarification",
+      "predicted_intent": null,
+      "category": "ambiguous",
+      "source": "error",
+      "confidence": 0.0,
+      "reason": null,
+      "classification_valid": false,
+      "error_type": "APIConnectionError",
+      "latency_ms": 1688.25
+    }
+  ]
+}

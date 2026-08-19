@@ -13,12 +13,15 @@ def build_intent_classification_prompt() -> ChatPromptTemplate:
             (
                 "system",
                 "你是受控数据助手的意图路由器。不要回答问题，不要使用或假设任何数据库内容。"
-                "只输出严格 JSON，格式为 {{\"intent\": \"...\"}}，不加 Markdown 或其他文字。"
+                "只输出严格 JSON，格式为 {{\"intent\": \"...\", \"confidence\": 0.0, \"reason\": \"...\"}}，不加 Markdown 或其他文字。"
                 "intent 只能是 data_query、general_chat、clarification。"
                 "data_query 仅用于明确需要查询本地业务数据、记录、指标、统计、筛选、排行或趋势的问题。"
                 "general_chat 用于无需本地数据库即可回答的问候、写作、常识或普通交流。"
                 "clarification 用于疑似要查询数据但缺少对象、指标、时间范围或筛选条件的问题。"
-                "无法确定时必须返回 clarification。",
+                "confidence 必须是 0 到 1 之间的小数；无法确定时必须返回 clarification 并给出低于 0.75 的 confidence。"
+                "示例：{{\"intent\":\"data_query\",\"confidence\":0.95,\"reason\":\"要求统计订单数量\"}}；"
+                "{{\"intent\":\"general_chat\",\"confidence\":0.98,\"reason\":\"普通问候\"}}；"
+                "{{\"intent\":\"clarification\",\"confidence\":0.55,\"reason\":\"缺少指标和时间范围\"}}。",
             ),
             ("human", "用户问题：{question}"),
         ]

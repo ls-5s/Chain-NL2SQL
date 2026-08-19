@@ -29,10 +29,11 @@ def build_query_graph(
     access_policy: AccessPolicy,
     query_timeout_seconds: float,
     llm_timeout_seconds: float | None = None,
+    intent_confidence_threshold: float = 0.75,
 ) -> Any:
     model_timeout_seconds = llm_timeout_seconds or query_timeout_seconds
     graph = StateGraph(NL2SQLState)
-    graph.add_node("intent_gate", make_intent_gate_node(llm_client, model_timeout_seconds))
+    graph.add_node("intent_gate", make_intent_gate_node(llm_client, model_timeout_seconds, intent_confidence_threshold))
     graph.add_node("retrieve_schema", _retrieve_schema_node(schema_retriever))
     graph.add_node("generate_sql", make_generation_node(llm_client, model_timeout_seconds))
     graph.add_node("validate_sql", make_validation_node(access_policy))
