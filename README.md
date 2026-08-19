@@ -185,6 +185,8 @@ app/
 ├── llm/             # 模型适配、Prompt、输出解析和重试
 ├── rag/             # 元数据、索引、检索和重排
 ├── db/              # 适配器、连接、SQL 策略和结果格式化
+├── tool/            # Graph 可调用的应用工具
+├── mcp/             # MCP 工具与外部服务集成边界
 ├── errors/          # 分类和脱敏
 └── observability/   # Trace、日志和指标
 
