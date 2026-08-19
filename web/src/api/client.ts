@@ -7,6 +7,7 @@ import type {
   KnowledgeDocument,
   QueryRequest,
   QueryResponse,
+  QueryStreamEvent,
 } from "@/types/api";
 
 const client = axios.create({ baseURL: "/api/v1", timeout: 20_000 });
@@ -41,6 +42,62 @@ export async function submitQuery(payload: QueryRequest): Promise<QueryResponse>
   } catch (error) {
     throw toApiError(error);
   }
+}
+
+export async function streamQuery(
+  payload: QueryRequest,
+  onProgress: (event: QueryStreamEvent) => void,
+): Promise<QueryResponse> {
+  let response: Response;
+  try {
+    response = await fetch("/api/v1/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    throw new ApiRequestError("无法连接到服务，请确认后端已启动。");
+  }
+
+  if (!response.ok) {
+    let detail = "请求未能完成。";
+    try {
+      const body = (await response.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      // Keep the generic error when the server did not return JSON.
+    }
+    throw new ApiRequestError(detail, response.status);
+  }
+  if (!response.body) throw new ApiRequestError("服务未返回 SSE 数据流。", response.status);
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let completed: QueryResponse | null = null;
+  const consume = (chunk: string) => {
+    buffer += chunk;
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() || "";
+    for (const frame of frames) {
+      const eventName = frame.match(/^event:\s*(.+)$/m)?.[1];
+      const dataLine = frame.match(/^data:\s*(.+)$/m)?.[1];
+      if (!eventName || !dataLine) continue;
+      const data = JSON.parse(dataLine) as QueryStreamEvent & QueryResponse;
+      if (eventName === "progress" || eventName === "start") onProgress(data);
+      if (eventName === "complete") completed = data as QueryResponse;
+      if (eventName === "error") throw new ApiRequestError(data.detail || "查询服务暂时不可用。", data.status_code);
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    consume(decoder.decode(value, { stream: true }));
+  }
+  consume(decoder.decode());
+  if (!completed) throw new ApiRequestError("查询流未返回最终结果。", response.status);
+  return completed;
 }
 
 export async function fetchApprovals(): Promise<ApprovalItem[]> {

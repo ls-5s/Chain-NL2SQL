@@ -22,5 +22,6 @@ def map_query_state(state: dict[str, Any]) -> QueryResponse:
         error_category=category,
         final_answer=state.get("final_answer") or "查询未完成。",
         result=state.get("query_result"),
+        generated_sql=state.get("generated_sql"),
         trace=state.get("trace", []),
     )

@@ -16,6 +16,7 @@ class QueryResponse(BaseModel):
     error_category: ErrorCategory | None = None
     final_answer: str
     result: QueryResult | None = None
+    generated_sql: str | None = None
     trace: list[TraceEvent] = Field(default_factory=list)
 
 

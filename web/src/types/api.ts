@@ -61,6 +61,23 @@ export interface QueryResponse {
   knowledge_hits?: KnowledgeHit[];
 }
 
+export interface QueryStreamEvent {
+  request_id?: string;
+  node?: string;
+  status?: QueryStatus;
+  iteration?: number;
+  message?: string;
+  error_category?: ErrorCategory | null;
+  retrieved_document_count?: number;
+  detail?: string;
+  status_code?: number;
+  explanation?: string;
+  tables?: string[];
+  sql?: string;
+  validated?: boolean;
+  row_count?: number;
+}
+
 export interface DatabaseListResponse {
   database_ids: string[];
 }
