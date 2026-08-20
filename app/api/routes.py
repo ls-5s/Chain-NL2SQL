@@ -11,9 +11,12 @@ from app.api.dependencies import RequestContext, get_request_context
 from app.api.response_mapper import map_query_state
 from app.config.settings import Settings, get_settings
 from app.db.sqlite_adapter import SQLiteAdapter
-from app.graph.builder import SQLiteSchemaRetriever, build_query_graph
+from app.graph.builder import build_query_graph
 from app.graph.state import NL2SQLState, create_initial_state
 from app.llm.factory import LLMConfigurationError, create_openai_client
+from app.rag.index_manager import SchemaIndexManager
+from app.rag.reranker import SentenceTransformerReranker
+from app.rag.vector_store import SentenceTransformerEmbedding
 from app.schemas.request import QueryRequest
 from app.schemas.response import DatabaseListResponse, HealthResponse
 
@@ -45,10 +48,34 @@ async def query(
     database = SQLiteAdapter(payload.database_id, settings.demo_database_path, settings.result_row_limit)
     try:
         llm_client = create_openai_client(settings)
+        embedding_cache: list[SentenceTransformerEmbedding] = []
+        reranker_cache: list[SentenceTransformerReranker] = []
+
+        def embedding_factory() -> SentenceTransformerEmbedding:
+            if not embedding_cache:
+                embedding_cache.append(SentenceTransformerEmbedding(settings.schema_embedding_model))
+            return embedding_cache[0]
+
+        def reranker_factory() -> SentenceTransformerReranker:
+            if not reranker_cache:
+                reranker_cache.append(SentenceTransformerReranker(settings.schema_reranker_model))
+            return reranker_cache[0]
+
+        schema_retriever = SchemaIndexManager(
+            database.inspect_schema,
+            root=settings.schema_index_root,
+            mode=settings.schema_retrieval_mode,
+            top_k=settings.schema_top_k,
+            fallback_mode=settings.schema_fallback_mode,
+            embedding_factory=embedding_factory,
+            reranker_factory=reranker_factory,
+            embedding_model_name=settings.schema_embedding_model,
+            reranker_model_name=settings.schema_reranker_model,
+        )
         graph = build_query_graph(
             database_executor=database,
             llm_client=llm_client,
-            schema_retriever=SQLiteSchemaRetriever(database),
+            schema_retriever=schema_retriever,
             access_policy=context.access_policy,
             query_timeout_seconds=settings.query_timeout_seconds,
             intent_confidence_threshold=settings.intent_confidence_threshold,
@@ -95,6 +122,7 @@ async def _stream_graph(graph: Any, state: NL2SQLState, database: SQLiteAdapter)
                 }
                 if node == "retrieve_schema":
                     progress["retrieved_document_count"] = len(current_state.get("schema_context", []))
+                    progress["retrieval_mode"] = current_state.get("retrieval_mode")
                 if node == "intent_gate":
                     progress["intent"] = _json_value(current_state.get("intent"))
                     progress["classification_valid"] = current_state.get("intent_classification_valid", False)
@@ -104,9 +132,7 @@ async def _stream_graph(graph: Any, state: NL2SQLState, database: SQLiteAdapter)
                 if current_state.get("error_category"):
                     progress["error_category"] = _json_value(current_state["error_category"])
                 if node == "retrieve_schema":
-                    progress["tables"] = [
-                        document.table_name for document in current_state.get("schema_context", [])
-                    ]
+                    progress["tables"] = current_state.get("retrieved_tables", [])
                 if node == "generate_sql" and current_state.get("generated_sql"):
                     progress["sql"] = current_state["generated_sql"]
                 if node == "validate_sql":

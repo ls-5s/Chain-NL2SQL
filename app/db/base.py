@@ -23,6 +23,8 @@ class DatabaseExecutor(Protocol):
 
     def inspect_schema(self, database_id: str) -> SchemaRetrieval: ...
 
+    def get_schema_version(self, database_id: str) -> str: ...
+
     # deadline 是 time.monotonic() 时间轴上的绝对值，不是墙上时钟时间。
     def execute_readonly(
         self,

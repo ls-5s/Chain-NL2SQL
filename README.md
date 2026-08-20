@@ -58,11 +58,11 @@
 | V | Schema 元数据标准化 | 已定义表、字段、外键的方言无关数据模型。 |
 | V | Schema 文档构建 | 可将表结构渲染为稳定、适合模型读取的 Schema 文档。 |
 | V | 检索接口契约 | 已定义 `SchemaRetriever` 协议和固定 Schema 版本返回模型。 |
-| X | Schema 检索 | 尚未实现根据问题筛选相关 Schema 文档。 |
-| X | ChromaDB 向量检索 | 向量存储文件为空壳。 |
-| X | BM25 关键词检索 | BM25 存储文件为空壳。 |
-| X | 混合召回与重排 | 混合检索器和 Reranker 文件为空壳。 |
-| X | 索引构建与版本管理 | 索引管理文件为空壳。 |
+| V | Schema 检索 | `SchemaIndexManager` 按问题召回，并在检索前应用数据库、表和字段权限过滤。 |
+| V | ChromaDB 向量检索 | 支持按数据库和 Schema 版本持久化的 Chroma collection，embedding 可注入。 |
+| V | BM25 关键词检索 | 支持 JSON 文档持久化、加载重建和确定性关键词召回。 |
+| V | 混合召回与重排 | 支持 vector/BM25/hybrid 模式、RRF 去重和可注入 CrossEncoder 重排，并可降级到 BM25。 |
+| V | 索引构建与版本管理 | 按 database_id 懒构建版本目录，manifest 记录指纹和模型版本，支持并发锁与原子切换。 |
 
 ### LangGraph 自纠错工作流
 

@@ -115,7 +115,7 @@ intent_gate
 | 节点 | 实现 | 作用 | 数据库/Schema 访问 |
 | --- | --- | --- | --- |
 | `intent_gate` | [`intent_node.py`](../app/graph/intent_node.py) | 规则优先，必要时调用无 Schema Prompt 将问题分类为三种意图 | 否 |
-| `retrieve_schema` | [`builder.py`](../app/graph/builder.py) 中的 `SQLiteSchemaRetriever` | 读取允许访问的表、字段、主外键和 Schema 版本指纹 | 是，仅 `data_query` |
+| `retrieve_schema` | [`index_manager.py`](../app/rag/index_manager.py) 中的 `SchemaIndexManager` | 按问题检索允许访问的 Schema，返回版本、模式和召回摘要 | 是，仅 `data_query` |
 | `generate_sql` | [`generation_node.py`](../app/graph/generation_node.py) | 基于固定 Schema 生成单条只读 SQL | 否 |
 | `validate_sql` | [`validation_node.py`](../app/graph/validation_node.py) | 执行 SQL AST、安全、表和字段白名单校验 | 否 |
 | `execute_sql` | [`execution_node.py`](../app/graph/execution_node.py) | 只读连接、参数绑定、超时中断和结果格式化 | 是，仅 `data_query` |
@@ -148,7 +148,11 @@ intent_gate
 
 ### 4.2 数据查询链路
 
-`retrieve_schema` 当前通过 `SQLiteSchemaRetriever` 直接读取当前数据库的完整 Schema，并生成版本指纹；尚未按问题做真正的 RAG 筛选。`generate_sql` 只接收问题、方言和 Schema，要求输出一条 `SELECT` 或最终只读的 `WITH` 查询。`validate_sql` 使用 AST 和服务端白名单检查单语句、只读操作、允许表和允许字段；不通过时将状态置为 `blocked`，不会调用执行器。
+`retrieve_schema` 当前通过 `SchemaIndexManager` 读取 SQLite Schema，按 `SchemaRetrievalRequest` 携带的问题、数据库、方言和表/字段访问策略执行检索。默认使用 `hybrid` 模式：BM25 和 Chroma 向量候选使用 RRF 合并去重，可选 Reranker 重排，最终返回 `SCHEMA_TOP_K` 张表。检索索引按 `database_id/schema_version` 懒构建并持久化；向量或重排依赖不可用时默认降级为 BM25，无法使用 BM25 时返回 `schema_retrieval_error`。
+
+权限过滤在检索前执行。未授权的表和字段不会进入最终 `schema_context` 或 SQL Prompt。`generate_sql` 只接收过滤后的问题、方言和 Schema，要求输出一条 `SELECT` 或最终只读的 `WITH` 查询。`validate_sql` 使用 AST 和服务端白名单检查单语句、只读操作、允许表和允许字段；不通过时将状态置为 `blocked`，不会调用执行器。
+
+首次检索得到的 `schema_version` 固定在 State 中。`execute_sql` 执行前重新读取数据库 Schema 指纹；版本变化时返回 `schema_changed`，不执行旧 SQL，也不在同一请求中替换 Schema 上下文。
 
 `execute_sql` 仅执行已校验 SQL，使用只读连接、参数绑定、截止时间进度回调、结果行数上限和敏感字段脱敏。执行失败会写入稳定的错误分类和安全消息。当前 Graph 是“一次生成、一次校验、一次执行”，执行失败后的 SQL 自动修复节点尚未接入。
 
@@ -165,6 +169,10 @@ intent_gate
 - `intent_reason`：简短分类理由；
 - `intent_source`：`rule` 或 `llm`；
 - `intent_classification_valid`：分类输出是否满足契约；
+- `schema_version`：首次 Schema 检索时固定的版本指纹；
+- `retrieval_mode`：`bm25`、`vector`、`hybrid` 或兼容路径的 `full_schema`；
+- `retrieval_scores`：内部召回分数摘要，不包含原始索引对象；
+- `retrieved_tables`：经过权限过滤后返回的表名；
 - `schema_context`、`generated_sql`、`validated_sql`、`query_result`：仅数据查询路径产生；
 - `error_category`、`safe_error`、`final_answer`：受控错误和最终回答。
 
@@ -206,7 +214,7 @@ event: progress
 data: {"node":"intent_gate","intent":"data_query","classification_valid":true,"confidence":0.96,"source":"rule","reason":"同时包含数据查询动作和业务数据对象"}
 
 event: progress
-data: {"node":"retrieve_schema","retrieved_document_count":4,"tables":["users","orders"]}
+data: {"node":"retrieve_schema","retrieval_mode":"hybrid","retrieved_document_count":2,"tables":["users","orders"]}
 
 event: progress
 data: {"node":"generate_sql","sql":"SELECT COUNT(*) AS user_count FROM users"}
@@ -313,7 +321,7 @@ SQL 执行前还会进行单语句、只读、表/字段白名单和 AST 检查�
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-当前后端测试基线为 **42 passed**。前端生产构建命令为：
+当前后端测试基线为 **49 passed**。前端生产构建命令为：
 
 ```powershell
 node node_modules/vite/bin/vite.js build
@@ -325,7 +333,7 @@ node node_modules/vite/bin/vite.js build
 
 - 当前按单条用户消息进行意图判断，尚未把多轮聊天历史传入分类和回答 Prompt；“那上个月呢”需要后续上下文能力。
 - 当前 `data_query` 是一次生成、一次校验、一次执行；`app/graph/repair_node.py` 仍是空壳，SQL 执行失败后的自动修复闭环尚未接入。
-- `SQLiteSchemaRetriever` 直接返回完整 Schema，尚未按问题实现真正的 RAG 筛选、混合检索和重排；相关 `app/rag` 模块不代表该 Graph 已完成接线。
+- Schema-RAG 已通过 `SchemaIndexManager` 接入 Graph，支持 BM25、向量和 Hybrid 模式、权限过滤、索引版本管理和执行前 Schema 漂移校验；详细说明见 [`Schema-RAG实现说明.md`](Schema-RAG实现说明.md)。
 - 当前 API 只编排本地 `demo` SQLite；MySQL 等其他数据库适配器尚未接入数据库 ID 路由。
 - [`app/tool/database_query.py`](../app/tool/database_query.py) 的 LangChain `query_database` 工具可独立创建，但 Graph 当前不采用模型自主工具调用。
 - `trace` 是预留的可展示节点摘要字段；SSE 有实时进度，但完整节点耗时尚未持久化为 TraceEvent。

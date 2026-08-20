@@ -20,7 +20,7 @@ class AccessPolicy:
     allowed_tables: frozenset[str] = frozenset()
     allowed_columns: Mapping[str, frozenset[str]] | None = None
     masked_columns: frozenset[str] = frozenset()
-
+    # 把所有表名、列名全部统一转小写。
     def __post_init__(self) -> None:
         # 初始化时统一策略名称，便于不区分大小写地比较 SQL 标识符。
         object.__setattr__(self, "allowed_tables", frozenset(table.lower() for table in self.allowed_tables))

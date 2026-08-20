@@ -20,3 +20,9 @@ def validate_settings(settings: Settings) -> None:
         raise ValueError("INTENT_CONFIDENCE_THRESHOLD must be between 0 and 1.")
     if not settings.allowed_database_ids:
         raise ValueError("At least one database id must be configured.")
+    if settings.schema_retrieval_mode not in {"vector", "bm25", "hybrid"}:
+        raise ValueError("SCHEMA_RETRIEVAL_MODE must be vector, bm25, or hybrid.")
+    if settings.schema_fallback_mode not in {"none", "bm25"}:
+        raise ValueError("SCHEMA_FALLBACK_MODE must be none or bm25.")
+    if not 1 <= settings.schema_top_k <= 50:
+        raise ValueError("SCHEMA_TOP_K must be between 1 and 50.")

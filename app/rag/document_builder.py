@@ -9,7 +9,7 @@ from app.schemas.domain import SchemaDocument, SchemaRetrieval
 
 
 def build_schema_retrieval(
-    database_id: str, tables: tuple[NormalizedTable, ...]
+    database_id: str, tables: tuple[NormalizedTable, ...], dialect: str = "sqlite"
 ) -> SchemaRetrieval:
     # 保留 introspector 的确定性表顺序，确保检索结果稳定。
     documents: list[SchemaDocument] = []
@@ -47,6 +47,7 @@ def build_schema_retrieval(
                 content=content,
                 database_id=database_id,
                 column_names=[column.name for column in table.columns],
+                dialect=dialect,
             )
         )
 

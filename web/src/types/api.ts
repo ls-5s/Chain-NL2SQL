@@ -13,6 +13,7 @@ export type ErrorCategory =
   | "connection_error"
   | "unsafe_sql"
   | "schema_changed"
+  | "schema_retrieval_error"
   | "unknown";
 
 export interface QueryRequest {
@@ -82,6 +83,7 @@ export interface QueryStreamEvent {
   sql?: string;
   validated?: boolean;
   row_count?: number;
+  retrieval_mode?: "vector" | "bm25" | "hybrid" | "full_schema";
   intent?: QueryIntent;
   classification_valid?: boolean;
   confidence?: number;

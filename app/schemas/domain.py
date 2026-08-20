@@ -38,6 +38,7 @@ class ErrorCategory(str, Enum):
     CONNECTION_ERROR = "connection_error"
     UNSAFE_SQL = "unsafe_sql"
     SCHEMA_CHANGED = "schema_changed"
+    SCHEMA_RETRIEVAL_ERROR = "schema_retrieval_error"
     UNKNOWN = "unknown"
 
 
@@ -58,6 +59,8 @@ class TraceEvent(BaseModel):
     duration_ms: int | None = None
     error_category: ErrorCategory | None = None
     retrieved_document_count: int | None = None
+    retrieval_mode: str | None = None
+    retrieved_tables: list[str] | None = None
 
 
 class SchemaDocument(BaseModel):
@@ -67,6 +70,7 @@ class SchemaDocument(BaseModel):
     content: str
     database_id: str
     column_names: list[str] = Field(default_factory=list)
+    dialect: str = "sqlite"
 
 
 class SchemaRetrieval(BaseModel):
@@ -74,3 +78,5 @@ class SchemaRetrieval(BaseModel):
 
     documents: list[SchemaDocument]
     schema_version: str
+    retrieval_mode: str | None = None
+    retrieval_scores: dict[str, float] = Field(default_factory=dict)

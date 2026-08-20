@@ -14,6 +14,20 @@ def make_execution_node(database_executor: DatabaseExecutor, access_policy: Acce
         sql = state.get("validated_sql")
         if not sql:
             return {}
+        expected_version = state.get("schema_version")
+        if expected_version:
+            get_schema_version = getattr(database_executor, "get_schema_version", None)
+            if get_schema_version is not None:
+                try:
+                    current_version = get_schema_version(state["database_id"])
+                except DatabaseExecutionError as error:
+                    return {"status": "failed", "error_category": error.category, "safe_error": error.safe_message}
+                if current_version != expected_version:
+                    return {
+                        "status": "failed",
+                        "error_category": "schema_changed",
+                        "safe_error": "The database schema changed during this request. Please retry.",
+                    }
         try:
             result = database_executor.execute_readonly(sql, time.monotonic() + timeout_seconds, access_policy)
         except DatabaseExecutionError as error:

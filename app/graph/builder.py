@@ -17,8 +17,8 @@ from app.graph.intent_node import make_intent_gate_node
 from app.graph.state import NL2SQLState
 from app.graph.validation_node import make_validation_node
 from app.llm.client import LLMClient
-from app.rag.retriever import SchemaRetriever
-from app.schemas.domain import QueryIntent
+from app.rag.retriever import SchemaRetrievalError, SchemaRetrievalRequest, SchemaRetriever
+from app.schemas.domain import QueryIntent, SchemaRetrieval, TraceEvent
 
 
 def build_query_graph(
@@ -34,7 +34,7 @@ def build_query_graph(
     model_timeout_seconds = llm_timeout_seconds or query_timeout_seconds
     graph = StateGraph(NL2SQLState)
     graph.add_node("intent_gate", make_intent_gate_node(llm_client, model_timeout_seconds, intent_confidence_threshold))
-    graph.add_node("retrieve_schema", _retrieve_schema_node(schema_retriever))
+    graph.add_node("retrieve_schema", _retrieve_schema_node(schema_retriever, access_policy))
     graph.add_node("generate_sql", make_generation_node(llm_client, model_timeout_seconds))
     graph.add_node("validate_sql", make_validation_node(access_policy))
     graph.add_node("execute_sql", make_execution_node(database_executor, access_policy, query_timeout_seconds))
@@ -66,10 +66,48 @@ def _route_after_intent(state: NL2SQLState) -> str:
     return intent.value if isinstance(intent, QueryIntent) else str(intent)
 
 
-def _retrieve_schema_node(retriever: SchemaRetriever):
+def _retrieve_schema_node(retriever: SchemaRetriever, access_policy: AccessPolicy):
     def retrieve(state: NL2SQLState) -> dict[str, object]:
-        retrieval = retriever.retrieve(state["question"], state["database_id"])
-        return {"schema_version": retrieval.schema_version, "schema_context": retrieval.documents}
+        request = SchemaRetrievalRequest(
+            question=state["question"],
+            database_id=state["database_id"],
+            dialect=state["dialect"],
+            allowed_tables=access_policy.allowed_tables,
+            allowed_columns=access_policy.allowed_columns or {},
+        )
+        try:
+            retrieval = retriever.retrieve(request)
+        except SchemaRetrievalError as error:
+            return {
+                "status": "failed",
+                "error_category": "schema_retrieval_error",
+                "safe_error": str(error),
+                "trace": state.get("trace", [])
+                + [TraceEvent(node="retrieve_schema", iteration=state["iteration"], error_category="schema_retrieval_error")],
+            }
+        except TypeError as error:
+            # Keep P0 third-party/test retrievers compatible while migrating the contract.
+            try:
+                retrieval = retriever.retrieve(request.question, request.database_id)  # type: ignore[call-arg]
+            except TypeError:
+                raise error
+        return {
+            "schema_version": retrieval.schema_version,
+            "schema_context": retrieval.documents,
+            "retrieval_mode": retrieval.retrieval_mode or "full_schema",
+            "retrieval_scores": retrieval.retrieval_scores,
+            "retrieved_tables": [document.table_name for document in retrieval.documents],
+            "trace": state.get("trace", [])
+            + [
+                TraceEvent(
+                    node="retrieve_schema",
+                    iteration=state["iteration"],
+                    retrieved_document_count=len(retrieval.documents),
+                    retrieval_mode=retrieval.retrieval_mode or "full_schema",
+                    retrieved_tables=[document.table_name for document in retrieval.documents],
+                )
+            ],
+        }
 
     return retrieve
 
@@ -78,5 +116,48 @@ class SQLiteSchemaRetriever:
     def __init__(self, database_executor: DatabaseExecutor) -> None:
         self.database_executor = database_executor
 
-    def retrieve(self, question: str, database_id: str):
-        return self.database_executor.inspect_schema(database_id)
+    def retrieve(self, request_or_question: SchemaRetrievalRequest | str, database_id: str | None = None):
+        if isinstance(request_or_question, SchemaRetrievalRequest):
+            request = request_or_question
+            retrieval = self.database_executor.inspect_schema(request.database_id)
+            return SchemaRetrieval(
+                documents=_filter_documents(retrieval.documents, request),
+                schema_version=retrieval.schema_version,
+                retrieval_mode="full_schema",
+            )
+        return self.database_executor.inspect_schema(database_id or request_or_question)
+
+
+def _filter_documents(documents, request: SchemaRetrievalRequest):
+    allowed_tables = {name.lower() for name in request.allowed_tables}
+    allowed_columns = {
+        table.lower(): {column.lower() for column in columns}
+        for table, columns in (request.allowed_columns or {}).items()
+    }
+    visible = []
+    for document in documents:
+        table_key = document.table_name.lower()
+        if allowed_tables and table_key not in allowed_tables:
+            continue
+        if table_key in allowed_columns:
+            columns = [column for column in document.column_names if column.lower() in allowed_columns[table_key]]
+            content_lines = document.content.splitlines()
+            column_line = next((line for line in content_lines if line.startswith("COLUMNS ")), "COLUMNS")
+            parts = column_line.removeprefix("COLUMNS ").split(",")
+            filtered_line = "COLUMNS " + ", ".join(
+                part.strip() for part in parts if part.strip().split(" ", 1)[0] in columns
+            )
+            primary_key = next((line.removeprefix("PRIMARY KEY ") for line in content_lines if line.startswith("PRIMARY KEY ")), "")
+            visible_primary = [item.strip() for item in primary_key.split(",") if item.strip() in columns]
+            content = "\n".join(
+                [
+                    f"TABLE {document.table_name}",
+                    filtered_line,
+                    f"PRIMARY KEY {', '.join(visible_primary) if visible_primary else 'none'}",
+                    "FOREIGN KEYS none",
+                ]
+            )
+            visible.append(document.model_copy(update={"column_names": columns, "content": content}))
+        else:
+            visible.append(document)
+    return visible

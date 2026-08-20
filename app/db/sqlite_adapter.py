@@ -38,6 +38,10 @@ class SQLiteAdapter:
         finally:
             connection.close()
 
+    def get_schema_version(self, database_id: str) -> str:
+        """读取当前 Schema 指纹，用于执行前检测漂移。"""
+        return self.inspect_schema(database_id).schema_version
+
     def execute_readonly(
         self,
         sql: str,
