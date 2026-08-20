@@ -12,7 +12,10 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+from filelock import FileLock
+
 from app.rag.bm25_store import BM25Store
+from app.rag.bm25_store import TOKENIZER_VERSION
 from app.rag.hybrid_retriever import reciprocal_rank_fusion
 from app.rag.reranker import Reranker, SentenceTransformerReranker
 from app.rag.retriever import SchemaRetrievalError, SchemaRetrievalRequest
@@ -56,13 +59,26 @@ class SchemaIndexManager:
         self.reranker_model_name = reranker_model_name
 
     def retrieve(self, request: SchemaRetrievalRequest) -> SchemaRetrieval:
-        full = self.schema_source(request.database_id)
-        documents = self._authorized_documents(full.documents, request)
+        try:
+            full = self.schema_source(request.database_id)
+            documents = self._authorized_documents(full.documents, request)
+        except SchemaRetrievalError:
+            raise
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise SchemaRetrievalError("Unable to read the Schema index source.") from error
         if not documents:
             return SchemaRetrieval(documents=[], schema_version=full.schema_version, retrieval_mode=self.mode)
-        index_path = self.root / _safe_component(request.database_id) / full.schema_version
-        with self._lock_for(request.database_id):
-            manifest = self._ensure_index(index_path, full.documents, full.schema_version, request.dialect)
+        scope_hash = _scope_hash(request, documents)
+        index_path = self.root / _safe_component(request.database_id) / full.schema_version / scope_hash
+        lock_path = index_path.parent / f".{scope_hash}.lock"
+        with self._lock_for(str(index_path)):
+            try:
+                with FileLock(str(lock_path), timeout=60):
+                    manifest = self._ensure_index(index_path, documents, full.schema_version, request.dialect, scope_hash)
+            except SchemaRetrievalError:
+                raise
+            except (OSError, ValueError, KeyError, TypeError, RuntimeError) as error:
+                raise SchemaRetrievalError("Schema index is unavailable.") from error
             try:
                 bm25 = BM25Store.load(index_path) if manifest["bm25_available"] else None
             except Exception as error:
@@ -75,7 +91,7 @@ class SchemaIndexManager:
                 try:
                     vector = ChromaVectorStore(
                         index_path / "vector",
-                        _collection_name(request.database_id, full.schema_version),
+                        _collection_name(request.database_id, full.schema_version, scope_hash),
                         self._embedding(),
                     )
                 except Exception as error:  # dependency/model/storage failures are handled below
@@ -101,21 +117,7 @@ class SchemaIndexManager:
             if mode == "bm25" and bm25 is not None:
                 bm25_hits = bm25.query(request.question, max(self.top_k * 2, 10))
                 vector_hits = []
-            allowed_tables = {document.table_name.lower() for document in documents}
-            allowed_ids = {
-                str(index)
-                for index, document in enumerate(full.documents)
-                if document.table_name.lower() in allowed_tables
-            }
-            bm25_hits = [hit for hit in bm25_hits if hit.document_id in allowed_ids]
-            vector_hits = [hit for hit in vector_hits if hit.document_id in allowed_ids]
-            ranked_documents_source = [
-                next(
-                    (authorized for authorized in documents if authorized.table_name.lower() == document.table_name.lower()),
-                    document.model_copy(update={"content": "", "column_names": []}),
-                )
-                for document in full.documents
-            ]
+            ranked_documents_source = documents
             reranker = None
             if mode in {"vector", "hybrid"}:
                 try:
@@ -140,12 +142,7 @@ class SchemaIndexManager:
                     [],
                     top_k=self.top_k,
                 )
-            authorized_by_table = {document.table_name.lower(): document for document in documents}
-            ranked_documents = [
-                authorized_by_table[item.document.table_name.lower()]
-                for item in ranked
-                if item.document.table_name.lower() in authorized_by_table
-            ]
+            ranked_documents = [item.document for item in ranked]
             if vector is not None:
                 vector.close()
             return SchemaRetrieval(
@@ -155,7 +152,14 @@ class SchemaIndexManager:
                 retrieval_scores={document.table_name: item.score for document, item in zip(ranked_documents, ranked)},
             )
 
-    def _ensure_index(self, path: Path, documents: list[SchemaDocument], version: str, dialect: str) -> dict[str, object]:
+    def _ensure_index(
+        self,
+        path: Path,
+        documents: list[SchemaDocument],
+        version: str,
+        dialect: str,
+        scope_hash: str,
+    ) -> dict[str, object]:
         manifest_path = path / "manifest.json"
         if manifest_path.exists() and (path / "bm25.json").exists():
             try:
@@ -172,6 +176,8 @@ class SchemaIndexManager:
                 if (
                     manifest.get("schema_version") == version
                     and manifest.get("document_count") == len(documents)
+                    and manifest.get("scope_hash") == scope_hash
+                    and manifest.get("tokenizer_version") == TOKENIZER_VERSION
                     and vector_requirement_satisfied
                     and models_match
                 ):
@@ -185,6 +191,8 @@ class SchemaIndexManager:
             manifest: dict[str, object] = {
                 "database_id": documents[0].database_id if documents else "",
                 "schema_version": version,
+                "scope_hash": scope_hash,
+                "tokenizer_version": TOKENIZER_VERSION,
                 "dialect": dialect,
                 "document_count": len(documents),
                 "document_fingerprints": [_fingerprint(document) for document in documents],
@@ -200,7 +208,7 @@ class SchemaIndexManager:
                     embedding = self._embedding()
                     vector = ChromaVectorStore(
                         temp_path / "vector",
-                        _collection_name(documents[0].database_id if documents else "schema", version),
+                        _collection_name(documents[0].database_id if documents else "schema", version, scope_hash),
                         embedding,
                     )
                     vector.build(documents)
@@ -247,9 +255,9 @@ class SchemaIndexManager:
         return self.reranker_factory()
 
     @classmethod
-    def _lock_for(cls, database_id: str) -> threading.RLock:
+    def _lock_for(cls, lock_key: str) -> threading.RLock:
         with cls._locks_guard:
-            return cls._locks.setdefault(database_id, threading.RLock())
+            return cls._locks.setdefault(lock_key, threading.RLock())
 
     @staticmethod
     def _authorized_documents(documents: list[SchemaDocument], request: SchemaRetrievalRequest) -> list[SchemaDocument]:
@@ -299,8 +307,22 @@ def _safe_component(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]", "_", value)
 
 
-def _collection_name(database_id: str, version: str) -> str:
-    return _safe_component(f"schema_{database_id}_{version[:16]}")[:63]
+def _scope_hash(request: SchemaRetrievalRequest, documents: list[SchemaDocument]) -> str:
+    import hashlib
+
+    scope = {
+        "database_id": request.database_id,
+        "allowed_tables": sorted(document.table_name.lower() for document in documents),
+        "allowed_columns": {
+            table.lower(): sorted(column.lower() for column in columns)
+            for table, columns in request.allowed_columns.items()
+        },
+    }
+    return hashlib.sha256(json.dumps(scope, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:24]
+
+
+def _collection_name(database_id: str, version: str, scope_hash: str) -> str:
+    return _safe_component(f"schema_{database_id}_{version[:12]}_{scope_hash[:12]}")[:63]
 
 
 def _remove_tree(path: Path) -> None:

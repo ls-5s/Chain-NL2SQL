@@ -7,6 +7,7 @@ import {
   CircleHelp,
   Database,
   FileStack,
+  LogOut,
   Menu,
   MessageSquare,
   PanelLeftClose,
@@ -18,10 +19,12 @@ import {
   UserRound,
   X,
 } from "lucide-vue-next";
+import { getDemoUsername, logout } from "@/auth/auth";
 
 const router = useRouter();
 const collapsed = ref(false);
 const mobileOpen = ref(false);
+const currentUser = getDemoUsername();
 function openKnowledge() {
   mobileOpen.value = false;
   router.push("/knowledge");
@@ -29,6 +32,10 @@ function openKnowledge() {
 function toggleCollapsed() {
   collapsed.value = !collapsed.value;
   localStorage.setItem("chain-sidebar-collapsed", String(collapsed.value));
+}
+function signOut() {
+  logout();
+  void router.replace("/login");
 }
 onMounted(() => {
   collapsed.value = localStorage.getItem("chain-sidebar-collapsed") === "true";
@@ -118,9 +125,17 @@ watch(
           >
             <Settings2 :size="18" /><span v-if="!collapsed">设置</span>
           </button>
+          <button
+            class="nav-item nav-item--muted"
+            :class="{ 'nav-item--centered': collapsed }"
+            :title="collapsed ? '退出登录' : undefined"
+            @click="signOut"
+          >
+            <LogOut :size="18" /><span v-if="!collapsed">退出登录</span>
+          </button>
           <div class="workspace-user" :class="{ 'workspace-user--centered': collapsed }">
             <span class="workspace-user__avatar">A</span
-            ><span v-if="!collapsed"><strong>本地工作区</strong><small>Administrator</small></span>
+            ><span v-if="!collapsed"><strong>{{ currentUser }}</strong><small>本地演示用户</small></span>
           </div>
         </div>
       </aside>
@@ -147,7 +162,10 @@ watch(
             <p>本地只读模式</p>
           </div>
         </div>
-      </aside>
+        <button class="nav-item nav-item--muted" @click="signOut">
+          <LogOut :size="18" />退出登录
+        </button>
+        </aside>
     </div>
   </div>
 </template>

@@ -38,7 +38,7 @@ app/
 │   ├── general_answer_node.py # 非数据库问题的通用回答
 │   ├── clarification_node.py # 信息不足时的澄清问题
 │   ├── finalize_node.py      # 统一生成最终状态和用户说明
-│   └── repair_node.py        # 预留的 SQL 自动修复节点，当前未接入
+│   └── repair_node.py        # 有限错误类别的 SQL 自动修复节点
 ├── llm/
 │   ├── client.py             # LLMClient 协议和 ModelResponse
 │   ├── factory.py            # OpenAI 兼容 ChatModel 适配
@@ -63,42 +63,159 @@ web/src/
 └── views/QueryView.vue       # 查询聊天界面和流式进度展示
 ```
 
-该目录说明只描述当前代码职责；`repair_node.py`、数据库工具、MySQL 适配器和 RAG 检索仍属于预留或未完整接入能力。
+该目录说明只描述当前代码职责。Schema-RAG 已通过 `SchemaIndexManager` 接入查询 Graph；`repair_node.py` 已接入有限错误类别修复，MySQL 适配器和独立数据库工具仍属于预留能力。
+
 ## 3. 完整流程图
 
 ```mermaid
 flowchart TD
-    A[客户端 POST /api/v1/query] --> B[校验请求参数与数据库访问策略]
-    B -->|拒绝| E403[HTTP 403/404]
-    B -->|通过| C[创建 RequestContext、SQLiteAdapter、LLMClient]
-    C --> D[start SSE\n发送 request_id]
-    D --> G[intent_gate\n规则优先，LLM 兜底]
-    G -->|data_query| I1[progress\n进入数据查询流程]
-    G -->|general_chat| I2[progress\n进入通用问答流程]
-    G -->|clarification| I3[progress\n进入澄清流程]
+    U[用户在 Vue 查询页面输入自然语言问题]
+    F[前端 streamQuery]
+    API[POST /api/v1/query]
+    PROXY[Vite Proxy<br/>localhost:5173 -> 127.0.0.1:8000]
+    RQ[请求校验<br/>question / database_id / max_iterations]
+    AUTH[RequestContext<br/>请求 ID + AccessPolicy]
+    DBCHK{数据库是否允许访问?}
+    DBERR[HTTP 403/404]
+    DB[SQLiteAdapter<br/>只读数据库适配器]
+    LLM[OpenAI 兼容 LLMClient]
+    GRAPH[LangGraph StateGraph]
+    START[SSE start]
 
-    subgraph DB[仅 data_query 可访问数据库]
-        I1 --> S[retrieve_schema\n读取允许访问的 Schema]
-        S --> Q[generate_sql\nLLM 生成单条只读 SQL]
-        Q --> V[validate_sql\nAST、单语句、只读、白名单]
-        V -->|通过| X[execute_sql\nSQLite 只读执行、超时、行数限制]
-        V -->|拦截| F[finalize]
-        X -->|成功或受控失败| F
+    U --> F --> PROXY --> API --> RQ --> AUTH --> DBCHK
+    DBCHK -- 否 --> DBERR --> F
+    DBCHK -- 是 --> DB
+    DB --> LLM
+    LLM --> GRAPH
+    GRAPH --> START --> F
+
+    subgraph INTENT[意图判断]
+        IG[intent_gate]
+        RULE[高置信规则判断]
+        INTENTLLM[LLM 分类 Prompt]
+        CLASSIFY{意图}
+        GENERAL[general_answer<br/>通用问答]
+        CLARIFY[clarify<br/>请求补充查询条件]
     end
 
-    I2 --> H[general_answer\nLLM 通用回答]
-    I3 --> CL[clarify\nLLM 生成澄清问题]
-    H --> F
-    CL --> F
-    F --> Z[complete SSE\n响应意图、状态、结果]
-    G -.模型异常.-> ER[error SSE]
-    Q -.模型异常.-> ER
-    H -.模型异常.-> ER
-    CL -.模型异常.-> ER
-    S -.Schema 异常.-> ER
-    X -.执行异常.-> ER
-    ER --> END[结束并关闭数据库适配器]
-    Z --> END
+    GRAPH --> IG
+    IG --> RULE
+    RULE -- 可直接判断 --> CLASSIFY
+    RULE -- 无法判断 --> INTENTLLM --> CLASSIFY
+    CLASSIFY -- general_chat --> GENERAL
+    CLASSIFY -- clarification --> CLARIFY
+    CLASSIFY -- data_query --> RETRIEVE
+    GENERAL --> FINAL
+    CLARIFY --> FINAL
+
+    subgraph RAG[Schema-RAG 检索链路]
+        RETRIEVE[retrieve_schema]
+        REQ[SchemaRetrievalRequest<br/>问题 / database_id / dialect / 权限]
+        INSPECT[读取 SQLite Schema]
+        NORMALIZE[元数据标准化]
+        DOC[构建 SchemaDocument]
+        VERSION[计算 schema_version]
+        INDEX[SchemaIndexManager<br/>按 database_id/version 懒构建]
+        MANIFEST[读取或创建 manifest]
+        PERMISSION[表级和字段级权限过滤]
+        MODE{检索模式}
+        BM25[BM25 关键词召回]
+        VECTOR[Chroma 向量召回]
+        RRF[RRF 合并与去重]
+        RERANK[Reranker 重排]
+        TOPK[截取 SCHEMA_TOP_K]
+        CONTEXT[写入 schema_context<br/>retrieval_mode / retrieved_tables]
+        FALLBACK{向量或重排可用?}
+        BMFALLBACK[降级到 BM25]
+        RAGERR[schema_retrieval_error]
+    end
+
+    RETRIEVE --> REQ --> INSPECT --> NORMALIZE --> DOC --> VERSION --> INDEX
+    INDEX --> MANIFEST --> PERMISSION --> MODE
+    MODE -- bm25 --> BM25 --> TOPK
+    MODE -- vector --> VECTOR --> FALLBACK
+    MODE -- hybrid --> BM25
+    MODE -- hybrid --> VECTOR
+    FALLBACK -- 是 --> RRF
+    FALLBACK -- 否且允许降级 --> BMFALLBACK --> TOPK
+    FALLBACK -- 否且禁止降级 --> RAGERR
+    VECTOR --> RRF
+    BM25 --> RRF
+    RRF --> RERANK --> TOPK
+    TOPK --> CONTEXT
+    RAGERR --> FINAL
+    CONTEXT --> GENERATE
+
+    subgraph SQLGEN[SQL 生成]
+        GENERATE[generate_sql]
+        PROMPT[SQL Generation Prompt<br/>问题 + 方言 + 过滤后的 Schema]
+        MODELGEN[LLM 生成 SQL]
+        PARSE[extract_sql<br/>提取单条 SQL]
+        VALIDOUTPUT{输出有效?}
+        INVALID[invalid_model_output]
+    end
+
+    GENERATE --> PROMPT --> MODELGEN --> PARSE --> VALIDOUTPUT
+    VALIDOUTPUT -- 否 --> INVALID --> FINAL
+    VALIDOUTPUT -- 是 --> VALIDATE
+
+    subgraph SECURITY[SQL 安全校验]
+        VALIDATE[validate_sql]
+        AST[sqlglot AST 解析]
+        READONLY[单条只读 SQL 检查]
+        TABLES[表白名单检查]
+        COLUMNS[字段白名单检查]
+        DANGEROUS[危险函数 / 系统表 / 注释检查]
+        SAFE{校验通过?}
+        BLOCKED[blocked<br/>阻止执行]
+    end
+
+    VALIDATE --> AST --> READONLY --> TABLES --> COLUMNS --> DANGEROUS --> SAFE
+    SAFE -- 否 --> BLOCKED --> FINAL
+    SAFE -- 是 --> EXECUTE
+
+    subgraph EXEC[数据库执行]
+        EXECUTE[execute_sql]
+        CURRENT[重新读取当前 Schema 版本]
+        DRIFT{schema_version 是否一致?}
+        CHANGED[schema_changed<br/>不执行旧 SQL]
+        DEADLINE[设置查询 deadline]
+        RO[SQLite mode=ro 只读连接]
+        PROGRESS[progress handler 超时中断]
+        RESULT[结果行数限制和字段脱敏]
+        SUCCESS[query_result]
+        DBFAIL[数据库执行失败<br/>connection/syntax/unknown]
+        REPAIRROUTE{可修复且未达轮次?}
+        REPAIR[repair_sql<br/>复用固定 Schema]
+    end
+
+    EXECUTE --> CURRENT --> DRIFT
+    DRIFT -- 否 --> CHANGED --> FINAL
+    DRIFT -- 是 --> DEADLINE --> RO --> PROGRESS
+    PROGRESS --> RESULT --> SUCCESS
+    PROGRESS --> DBFAIL
+    DBFAIL --> REPAIRROUTE
+    REPAIRROUTE -- 是 --> REPAIR --> VALIDATE
+    REPAIRROUTE -- 否 --> FINAL
+    SUCCESS --> FINAL
+
+    FINAL[finalize]
+    RESPONSE[map_query_state<br/>生成安全 QueryResponse]
+    SSEPROGRESS[SSE progress<br/>节点 / 状态 / 检索模式 / 表名]
+    COMPLETE[SSE complete]
+    ERROR[SSE error]
+
+    IG -.-> SSEPROGRESS
+    RETRIEVE -.-> SSEPROGRESS
+    GENERATE -.-> SSEPROGRESS
+    VALIDATE -.-> SSEPROGRESS
+    EXECUTE -.-> SSEPROGRESS
+    REPAIR -.-> SSEPROGRESS
+    GENERAL -.-> SSEPROGRESS
+    CLARIFY -.-> SSEPROGRESS
+    FINAL --> RESPONSE --> COMPLETE --> F
+    DBERR --> ERROR
+    RAGERR --> ERROR
 ```
 
 ## 4. Graph 节点与路由
@@ -107,7 +224,9 @@ flowchart TD
 
 ```text
 intent_gate
-  ├─ data_query     -> retrieve_schema -> generate_sql -> validate_sql -> execute_sql -> finalize -> END
+  ├─ data_query     -> retrieve_schema -> generate_sql -> validate_sql -> execute_sql
+  │                  -> repair_sql（可修复错误且未达轮次） -> validate_sql
+  │                  -> finalize -> END
   ├─ general_chat   -> general_answer -> finalize -> END
   └─ clarification  -> clarify -> finalize -> END
 ```
@@ -121,6 +240,7 @@ intent_gate
 | `execute_sql` | [`execution_node.py`](../app/graph/execution_node.py) | 只读连接、参数绑定、超时中断和结果格式化 | 是，仅 `data_query` |
 | `general_answer` | [`general_answer_node.py`](../app/graph/general_answer_node.py) | 回答无需本地数据库的普通问题 | 否 |
 | `clarify` | [`clarification_node.py`](../app/graph/clarification_node.py) | 询问缺少的对象、指标、时间或筛选条件 | 否 |
+| `repair_sql` | [`repair_node.py`](../app/graph/repair_node.py) | 对有限数据库错误复用固定 Schema 生成修复 SQL，并受最大轮次限制 | 否 |
 | `finalize` | [`finalize_node.py`](../app/graph/finalize_node.py) | 整理回答、查询结果或受控错误 | 否 |
 
 ### 4.1 意图分类规则与 LLM 契约
@@ -150,11 +270,11 @@ intent_gate
 
 `retrieve_schema` 当前通过 `SchemaIndexManager` 读取 SQLite Schema，按 `SchemaRetrievalRequest` 携带的问题、数据库、方言和表/字段访问策略执行检索。默认使用 `hybrid` 模式：BM25 和 Chroma 向量候选使用 RRF 合并去重，可选 Reranker 重排，最终返回 `SCHEMA_TOP_K` 张表。检索索引按 `database_id/schema_version` 懒构建并持久化；向量或重排依赖不可用时默认降级为 BM25，无法使用 BM25 时返回 `schema_retrieval_error`。
 
-权限过滤在检索前执行。未授权的表和字段不会进入最终 `schema_context` 或 SQL Prompt。`generate_sql` 只接收过滤后的问题、方言和 Schema，要求输出一条 `SELECT` 或最终只读的 `WITH` 查询。`validate_sql` 使用 AST 和服务端白名单检查单语句、只读操作、允许表和允许字段；不通过时将状态置为 `blocked`，不会调用执行器。
+权限过滤在检索前执行。未授权的表和字段不会进入索引 scope、最终 `schema_context` 或 SQL Prompt。`generate_sql` 只接收过滤后的问题、方言和 Schema，要求输出一条 `SELECT` 或最终只读的 `WITH` 查询。`validate_sql` 使用 AST 和服务端白名单检查单语句、只读操作、允许表和允许字段；安全策略违规保持 `blocked`，语法错误可进入有限修复流程。
 
 首次检索得到的 `schema_version` 固定在 State 中。`execute_sql` 执行前重新读取数据库 Schema 指纹；版本变化时返回 `schema_changed`，不执行旧 SQL，也不在同一请求中替换 Schema 上下文。
 
-`execute_sql` 仅执行已校验 SQL，使用只读连接、参数绑定、截止时间进度回调、结果行数上限和敏感字段脱敏。执行失败会写入稳定的错误分类和安全消息。当前 Graph 是“一次生成、一次校验、一次执行”，执行失败后的 SQL 自动修复节点尚未接入。
+`execute_sql` 仅执行已校验 SQL，使用只读连接、参数绑定、截止时间进度回调、结果行数上限和敏感字段脱敏。执行失败会写入稳定的错误分类和安全消息；语法、未知表/字段、连接关系和聚合错误在未超过 `max_iterations` 时进入 `repair_sql`，修复阶段复用首次检索的 Schema，不重复检索。检索为空时直接返回 `schema_retrieval_error`，不会调用 SQL 生成模型。
 
 ### 4.3 数据库工具边界
 
@@ -321,7 +441,7 @@ SQL 执行前还会进行单语句、只读、表/字段白名单和 AST 检查�
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-当前后端测试基线为 **49 passed**。前端生产构建命令为：
+当前后端测试基线为 **53 passed**。前端生产构建命令为：
 
 ```powershell
 node node_modules/vite/bin/vite.js build
@@ -332,7 +452,7 @@ node node_modules/vite/bin/vite.js build
 ## 11. 当前边界与后续工作
 
 - 当前按单条用户消息进行意图判断，尚未把多轮聊天历史传入分类和回答 Prompt；“那上个月呢”需要后续上下文能力。
-- 当前 `data_query` 是一次生成、一次校验、一次执行；`app/graph/repair_node.py` 仍是空壳，SQL 执行失败后的自动修复闭环尚未接入。
+- 当前 `data_query` 支持一次首轮生成和受 `max_iterations` 限制的有限 SQL 修复；更复杂的多轮对话和领域级错误分类仍待增强。
 - Schema-RAG 已通过 `SchemaIndexManager` 接入 Graph，支持 BM25、向量和 Hybrid 模式、权限过滤、索引版本管理和执行前 Schema 漂移校验；详细说明见 [`Schema-RAG实现说明.md`](Schema-RAG实现说明.md)。
 - 当前 API 只编排本地 `demo` SQLite；MySQL 等其他数据库适配器尚未接入数据库 ID 路由。
 - [`app/tool/database_query.py`](../app/tool/database_query.py) 的 LangChain `query_database` 工具可独立创建，但 Graph 当前不采用模型自主工具调用。

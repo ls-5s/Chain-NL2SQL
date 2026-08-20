@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -22,6 +23,10 @@ from app.schemas.response import DatabaseListResponse, HealthResponse
 
 api_router = APIRouter(prefix="/api/v1", tags=["nl2sql"])
 system_router = APIRouter(tags=["system"])
+
+_provider_lock = threading.Lock()
+_embedding_providers: dict[str, SentenceTransformerEmbedding] = {}
+_reranker_providers: dict[str, SentenceTransformerReranker] = {}
 
 
 @system_router.get("/health", response_model=HealthResponse)
@@ -48,18 +53,23 @@ async def query(
     database = SQLiteAdapter(payload.database_id, settings.demo_database_path, settings.result_row_limit)
     try:
         llm_client = create_openai_client(settings)
-        embedding_cache: list[SentenceTransformerEmbedding] = []
-        reranker_cache: list[SentenceTransformerReranker] = []
-
         def embedding_factory() -> SentenceTransformerEmbedding:
-            if not embedding_cache:
-                embedding_cache.append(SentenceTransformerEmbedding(settings.schema_embedding_model))
-            return embedding_cache[0]
+            name = settings.schema_embedding_model
+            with _provider_lock:
+                provider = _embedding_providers.get(name)
+                if provider is None:
+                    provider = SentenceTransformerEmbedding(name)
+                    _embedding_providers[name] = provider
+                return provider
 
         def reranker_factory() -> SentenceTransformerReranker:
-            if not reranker_cache:
-                reranker_cache.append(SentenceTransformerReranker(settings.schema_reranker_model))
-            return reranker_cache[0]
+            name = settings.schema_reranker_model
+            with _provider_lock:
+                provider = _reranker_providers.get(name)
+                if provider is None:
+                    provider = SentenceTransformerReranker(name)
+                    _reranker_providers[name] = provider
+                return provider
 
         schema_retriever = SchemaIndexManager(
             database.inspect_schema,
@@ -164,6 +174,7 @@ def _node_message(node: str) -> str:
         "intent_gate": "正在理解问题并判断处理方式",
         "retrieve_schema": "正在读取数据库 Schema",
         "generate_sql": "正在生成只读 SQL",
+        "repair_sql": "正在根据执行错误修复 SQL",
         "validate_sql": "正在校验 SQL 安全性",
         "execute_sql": "正在执行查询",
         "general_answer": "正在生成通用回答",
@@ -188,6 +199,8 @@ def _node_explanation(node: str, state: dict[str, Any]) -> str:
         return f"读取服务端允许访问的 Schema，共获得 {count} 张表的结构信息。"
     if node == "generate_sql":
         return "根据用户问题和固定 Schema 生成单条只读 SQL。"
+    if node == "repair_sql":
+        return "复用首次检索的 Schema 和脱敏错误信息，尝试修复 SQL。"
     if node == "validate_sql":
         if state.get("validated_sql"):
             return "SQL 已通过单语句、只读操作、表白名单和字段白名单校验。"

@@ -15,7 +15,8 @@ def make_validation_node(access_policy: AccessPolicy):
         result = validate_readonly_sql(sql, state["dialect"], access_policy)
         if not result.allowed:
             category = "syntax_error" if result.reason == "syntax_error" else "unsafe_sql"
-            return {"status": "blocked", "error_category": category, "safe_error": "The generated SQL was blocked by the read-only security policy."}
+            status = "failed" if category == "syntax_error" else "blocked"
+            return {"status": status, "error_category": category, "safe_error": "The generated SQL was blocked by the read-only security policy."}
         return {"validated_sql": sql}
 
     return validate

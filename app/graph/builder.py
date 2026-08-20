@@ -7,7 +7,7 @@ from typing import Any
 from langgraph.graph import END, StateGraph
 
 from app.api.authorization import AccessPolicy
-from app.db.base import DatabaseExecutor
+from app.db.base import DatabaseExecutionError, DatabaseExecutor
 from app.graph.clarification_node import make_clarification_node
 from app.graph.execution_node import make_execution_node
 from app.graph.finalize_node import make_finalize_node
@@ -16,9 +16,10 @@ from app.graph.generation_node import make_generation_node
 from app.graph.intent_node import make_intent_gate_node
 from app.graph.state import NL2SQLState
 from app.graph.validation_node import make_validation_node
+from app.graph.repair_node import REPAIRABLE_ERRORS, make_repair_node
 from app.llm.client import LLMClient
 from app.rag.retriever import SchemaRetrievalError, SchemaRetrievalRequest, SchemaRetriever
-from app.schemas.domain import QueryIntent, SchemaRetrieval, TraceEvent
+from app.schemas.domain import QueryIntent, QueryStatus, SchemaRetrieval, TraceEvent
 
 
 def build_query_graph(
@@ -38,6 +39,7 @@ def build_query_graph(
     graph.add_node("generate_sql", make_generation_node(llm_client, model_timeout_seconds))
     graph.add_node("validate_sql", make_validation_node(access_policy))
     graph.add_node("execute_sql", make_execution_node(database_executor, access_policy, query_timeout_seconds))
+    graph.add_node("repair_sql", make_repair_node(llm_client, model_timeout_seconds))
     graph.add_node("general_answer", make_general_answer_node(llm_client, model_timeout_seconds))
     graph.add_node("clarify", make_clarification_node(llm_client, model_timeout_seconds))
     graph.add_node("finalize", make_finalize_node())
@@ -51,10 +53,19 @@ def build_query_graph(
             QueryIntent.CLARIFICATION.value: "clarify",
         },
     )
-    graph.add_edge("retrieve_schema", "generate_sql")
+    graph.add_conditional_edges(
+        "retrieve_schema",
+        _route_after_retrieval,
+        {"running": "generate_sql", "failed": "finalize", "blocked": "finalize"},
+    )
     graph.add_edge("generate_sql", "validate_sql")
     graph.add_edge("validate_sql", "execute_sql")
-    graph.add_edge("execute_sql", "finalize")
+    graph.add_conditional_edges(
+        "execute_sql",
+        _route_after_execution,
+        {"repair": "repair_sql", "finalize": "finalize"},
+    )
+    graph.add_edge("repair_sql", "validate_sql")
     graph.add_edge("general_answer", "finalize")
     graph.add_edge("clarify", "finalize")
     graph.add_edge("finalize", END)
@@ -64,6 +75,25 @@ def build_query_graph(
 def _route_after_intent(state: NL2SQLState) -> str:
     intent = state.get("intent", QueryIntent.CLARIFICATION)
     return intent.value if isinstance(intent, QueryIntent) else str(intent)
+
+
+def _route_after_retrieval(state: NL2SQLState) -> str:
+    status = state.get("status", QueryStatus.FAILED)
+    return status.value if isinstance(status, QueryStatus) else str(status)
+
+
+def _route_after_execution(state: NL2SQLState) -> str:
+    status = state.get("status", QueryStatus.FAILED)
+    status_value = status.value if isinstance(status, QueryStatus) else str(status)
+    category = state.get("error_category")
+    category_value = category.value if hasattr(category, "value") else category
+    if (
+        status_value == QueryStatus.FAILED.value
+        and category_value in REPAIRABLE_ERRORS
+        and state.get("iteration", 0) < state.get("max_iterations", 0)
+    ):
+        return "repair"
+    return "finalize"
 
 
 def _retrieve_schema_node(retriever: SchemaRetriever, access_policy: AccessPolicy):
@@ -79,9 +109,21 @@ def _retrieve_schema_node(retriever: SchemaRetriever, access_policy: AccessPolic
             retrieval = retriever.retrieve(request)
         except SchemaRetrievalError as error:
             return {
-                "status": "failed",
+                "status": QueryStatus.FAILED,
                 "error_category": "schema_retrieval_error",
-                "safe_error": str(error),
+                "safe_error": "Schema 检索暂时不可用，请稍后重试。",
+                "retrieval_mode": "error",
+                "retrieved_tables": [],
+                "trace": state.get("trace", [])
+                + [TraceEvent(node="retrieve_schema", iteration=state["iteration"], error_category="schema_retrieval_error")],
+            }
+        except (DatabaseExecutionError, OSError, PermissionError, ValueError) as error:
+            return {
+                "status": QueryStatus.FAILED,
+                "error_category": "schema_retrieval_error",
+                "safe_error": "Schema 检索暂时不可用，请稍后重试。",
+                "retrieval_mode": "error",
+                "retrieved_tables": [],
                 "trace": state.get("trace", [])
                 + [TraceEvent(node="retrieve_schema", iteration=state["iteration"], error_category="schema_retrieval_error")],
             }
@@ -91,6 +133,28 @@ def _retrieve_schema_node(retriever: SchemaRetriever, access_policy: AccessPolic
                 retrieval = retriever.retrieve(request.question, request.database_id)  # type: ignore[call-arg]
             except TypeError:
                 raise error
+        if not retrieval.documents:
+            return {
+                "status": QueryStatus.FAILED,
+                "schema_version": retrieval.schema_version,
+                "schema_context": [],
+                "retrieval_mode": retrieval.retrieval_mode or "empty",
+                "retrieval_scores": {},
+                "retrieved_tables": [],
+                "error_category": "schema_retrieval_error",
+                "safe_error": "未检索到与问题匹配的授权 Schema，未执行 SQL。",
+                "trace": state.get("trace", [])
+                + [
+                    TraceEvent(
+                        node="retrieve_schema",
+                        iteration=state["iteration"],
+                        retrieved_document_count=0,
+                        retrieval_mode=retrieval.retrieval_mode or "empty",
+                        retrieved_tables=[],
+                        error_category="schema_retrieval_error",
+                    )
+                ],
+            }
         return {
             "schema_version": retrieval.schema_version,
             "schema_context": retrieval.documents,
