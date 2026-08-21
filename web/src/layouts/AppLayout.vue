@@ -11,14 +11,21 @@ import {
   UserRound,
   X,
 } from "lucide-vue-next";
-import { getDemoUsername } from "@/auth/auth";
+import AccountMenu from "@/components/AccountMenu.vue";
+import { getDemoUsername, logout } from "@/auth/auth";
 
 const router = useRouter();
 const currentUser = getDemoUsername();
 const mobileNavigation = ref<HTMLDialogElement | null>(null);
+const profileMenuOpen = ref(false);
 
-function openKnowledge() {
-  void router.push("/knowledge");
+function toggleProfileMenu() {
+  profileMenuOpen.value = !profileMenuOpen.value;
+}
+
+function signOut() {
+  logout();
+  void router.replace("/login");
 }
 
 function closeMobileNavigation() {
@@ -72,7 +79,14 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleAgentShortcut)
         </button>
         <span class="header-divider" aria-hidden="true" />
         <span class="service-status"><i aria-hidden="true" />服务正常</span>
-        <button class="profile-button" type="button" :aria-label="currentUser" :title="currentUser">
+        <button
+          class="profile-button"
+          type="button"
+          :aria-expanded="profileMenuOpen"
+          aria-haspopup="dialog"
+          :aria-label="`${currentUser} 的账户菜单`"
+          @click="toggleProfileMenu"
+        >
           <UserRound :size="17" :stroke-width="1.8" aria-hidden="true" />
         </button>
       </div>
@@ -83,7 +97,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleAgentShortcut)
     </header>
 
     <aside class="rail" aria-label="主导航">
-      <RouterLink class="rail-logo" to="/query" aria-label="Chain-NL2SQL 首页" title="Chain-NL2SQL">
+      <RouterLink class="rail-logo" to="/agent" aria-label="Chain-NL2SQL 首页" title="Chain-NL2SQL">
         <Database :size="27" :stroke-width="1.8" aria-hidden="true" />
       </RouterLink>
 
@@ -120,16 +134,23 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleAgentShortcut)
         <button
           class="user-button"
           type="button"
-          :aria-label="`${currentUser}，本地演示用户`"
+          :aria-expanded="profileMenuOpen"
+          aria-haspopup="dialog"
+          :aria-label="`${currentUser} 的账户菜单`"
           aria-describedby="user-tooltip"
+          @click="toggleProfileMenu"
         >
-          <img src="/user-avatar.jpg" :alt="`${currentUser} 的头像`" />
-          <span id="user-tooltip" class="user-tooltip" role="tooltip">{{ currentUser }}</span>
+          {{ currentUser.slice(0, 2).toUpperCase() }}
+          <span id="user-tooltip" class="rail-tooltip rail-tooltip--label" role="tooltip">
+            {{ currentUser }}
+          </span>
         </button>
       </div>
     </aside>
 
     <main class="app-main"><slot /></main>
+
+    <AccountMenu v-model:open="profileMenuOpen" :username="currentUser" @logout="signOut" />
 
     <dialog ref="mobileNavigation" class="mobile-navigation" @click.self="closeMobileNavigation">
       <div class="mobile-navigation__header">
@@ -150,15 +171,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleAgentShortcut)
         <RouterLink to="/rag" @click="closeMobileNavigation"
           ><LibraryBig :size="19" />RAG 资料库</RouterLink
         >
-        <button
-          type="button"
-          @click="
-            openKnowledge();
-            closeMobileNavigation();
-          "
-        >
-          新建资料
-        </button>
       </nav>
     </dialog>
   </div>
@@ -395,7 +407,7 @@ kbd {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 9px 8px 15px;
+  padding: 8px 15px;
   border-radius: 999px;
   color: #ffffff;
   background: #1f1f1f;
@@ -431,7 +443,9 @@ kbd {
 .rail-link--agent:hover .rail-tooltip,
 .rail-link--agent:focus-visible .rail-tooltip,
 .rail-link--tooltip:hover .rail-tooltip,
-.rail-link--tooltip:focus-visible .rail-tooltip {
+.rail-link--tooltip:focus-visible .rail-tooltip,
+.user-button:hover .rail-tooltip,
+.user-button:focus-visible .rail-tooltip {
   visibility: visible;
   transform: translate(0, -50%);
   opacity: 1;
@@ -453,46 +467,10 @@ kbd {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: #edf3f8;
-}
-
-.user-button img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  object-fit: cover;
-}
-
-.user-tooltip {
-  position: absolute;
-  top: 50%;
-  left: calc(100% + 12px);
-  z-index: 40;
-  padding: 7px 10px;
-  border: 1px solid #303030;
-  color: #272727;
-  background: #ffffff;
-  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.08);
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 1;
-  pointer-events: none;
-  transform: translate(-4px, -50%);
-  opacity: 0;
-  visibility: hidden;
-  white-space: nowrap;
-  transition:
-    opacity 0.16s ease,
-    transform 0.16s ease,
-    visibility 0.16s;
-}
-
-.user-button:hover .user-tooltip,
-.user-button:focus-visible .user-tooltip {
-  visibility: visible;
-  transform: translate(0, -50%);
-  opacity: 1;
+  color: #ffffff;
+  background: #2f8bc1;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .app-main {

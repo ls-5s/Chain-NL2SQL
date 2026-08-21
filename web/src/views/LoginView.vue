@@ -34,7 +34,7 @@ function safeRedirect(): string {
     !redirect.startsWith("//") &&
     redirect !== "/login"
     ? redirect
-    : "/query";
+    : "/agent";
 }
 function redirectAfterLogin(): void {
   void router.replace(safeRedirect());
@@ -73,12 +73,19 @@ if (isAuthenticated()) redirectAfterLogin();
           <span class="brand-mark"><Database :size="19" :stroke-width="2.1" /></span
           ><span class="brand-name">Chain-NL2SQL</span><span class="brand-badge">WORKSPACE</span>
         </header>
-        <div class="story-main">
-          <div class="story-copy login-reveal login-reveal--copy">
-            <p class="story-kicker"><Sparkles :size="14" /> DATA, IN PLAIN LANGUAGE</p>
-            <h1>让数据<br /><em>回答问题。</em></h1>
-            <p class="story-description">从自然语言到可解释的 SQL，让每一次探索都更快、更清晰。</p>
-          </div>
+          <div class="story-main">
+            <div class="story-copy login-reveal login-reveal--copy">
+              <p class="story-kicker"><Sparkles :size="14" /> DATA, IN PLAIN LANGUAGE</p>
+              <div class="story-title-marquee" aria-label="让数据回答问题。">
+                <div class="story-title-marquee__track">
+                  <h1 class="story-title">让数据<br /><em>回答问题。</em></h1>
+                  <div class="story-title story-title--duplicate" aria-hidden="true">
+                    让数据<br /><em>回答问题。</em>
+                  </div>
+                </div>
+              </div>
+              <p class="story-description">从自然语言到可解释的 SQL，让每一次探索都更快、更清晰。</p>
+            </div>
           <div class="signal-row login-reveal login-reveal--signals" aria-label="工作台能力">
             <span><MessageSquareText :size="15" />自然语言</span><i /><span
               ><BarChart3 :size="15" />可解释结果</span
@@ -388,14 +395,26 @@ if (isAuthenticated()) redirectAfterLogin();
   letter-spacing: 0.13em;
   animation: kicker-breathe 6s ease-in-out infinite 1.4s;
 }
-.story-copy h1 {
+.story-title-marquee {
+  width: min(100%, 440px);
+  overflow: hidden;
+}
+.story-title-marquee__track {
+  display: flex;
+  width: max-content;
+  gap: 112px;
+  will-change: transform;
+  animation: story-title-scroll 15s linear infinite;
+}
+.story-title {
+  flex: 0 0 auto;
   margin: 0;
   color: #f5faf6;
   font-size: clamp(44px, 5.2vw, 74px);
   font-weight: 700;
   line-height: 1.03;
 }
-.story-copy h1 em {
+.story-title em {
   display: inline-block;
   color: #bde9ce;
   background: linear-gradient(
@@ -966,6 +985,11 @@ if (isAuthenticated()) redirectAfterLogin();
     transform: translate3d(0, 0, 0);
   }
 }
+@keyframes story-title-scroll {
+  to {
+    transform: translateX(calc(-50% - 56px));
+  }
+}
 @keyframes startup-plane {
   0% {
     opacity: 0;
@@ -1118,7 +1142,7 @@ if (isAuthenticated()) redirectAfterLogin();
   .story-main {
     padding: 38px 0 42px;
   }
-  .story-copy h1 {
+  .story-title {
     font-size: clamp(36px, 5vw, 52px);
   }
   .story-description {
@@ -1182,7 +1206,7 @@ if (isAuthenticated()) redirectAfterLogin();
     margin-bottom: 14px;
     font-size: 9px;
   }
-  .story-copy h1 {
+  .story-title {
     font-size: 38px;
   }
   .story-description {
@@ -1247,8 +1271,9 @@ if (isAuthenticated()) redirectAfterLogin();
   .startup-radar,
   .startup-radar i,
   .startup-caption,
-  .login-reveal,
-  .story-grid,
+    .login-reveal,
+    .story-title-marquee__track,
+    .story-grid,
   .story-orbit,
   .preview-status i,
   .query-preview::after,
@@ -1267,6 +1292,9 @@ if (isAuthenticated()) redirectAfterLogin();
   .login-reveal {
     opacity: 1;
     transform: none;
+  }
+  .story-title--duplicate {
+    display: none;
   }
   .startup-sequence {
     display: none;
