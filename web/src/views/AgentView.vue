@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import {
   AudioLines,
@@ -12,36 +12,50 @@ import {
 } from "lucide-vue-next";
 
 import { fetchDatabases, streamQuery } from "@/api/client";
+import { useAgentConversationStore, type AgentChatMessage } from "@/composables/agentConversations";
 import type {
   QueryIntent,
   QueryResponse,
   QueryResult,
   QueryStatus,
-  QueryStreamEvent,
 } from "@/types/api";
-
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  response?: QueryResponse;
-  progress?: QueryStreamEvent[];
-}
 
 const question = ref("");
 const databaseId = ref("demo");
 const databases = ref<string[]>([]);
 const loading = ref(false);
-const messages = ref<ChatMessage[]>([]);
 const conversation = ref<HTMLElement | null>(null);
 const agentStep = ref("正在准备查询");
+const store = useAgentConversationStore();
+const messages = computed(() => store.activeConversation.value.messages);
+
+watch(
+  () => store.activeConversationId.value,
+  () => {
+    question.value = store.activeConversation.value.draft;
+    databaseId.value = store.activeConversation.value.databaseId;
+    loading.value = false;
+    void scrollToBottom();
+  },
+  { immediate: true },
+);
+
+watch(question, (value) => {
+  if (!loading.value && value !== store.activeConversation.value.draft) store.setDraft(value);
+});
+
+watch(databaseId, (value) => {
+  if (value !== store.activeConversation.value.databaseId) store.setDatabaseId(value);
+});
 
 const canSubmit = computed(() => question.value.trim().length > 0 && !loading.value);
 
 onMounted(async () => {
   try {
     databases.value = await fetchDatabases();
-    databaseId.value = databases.value[0] || "demo";
+    if (databases.value.length && !databases.value.includes(databaseId.value)) {
+      databaseId.value = databases.value[0];
+    }
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "无法加载数据库列表");
   }
@@ -52,15 +66,18 @@ async function askQuestion(value = question.value) {
   if (!text || loading.value) return;
 
   question.value = "";
-  messages.value.push({ id: crypto.randomUUID(), role: "user", content: text });
-  const assistantMessage: ChatMessage = {
+  const userMessage: AgentChatMessage = { id: crypto.randomUUID(), role: "user", content: text };
+  store.appendMessage(userMessage);
+  const assistantMessage: AgentChatMessage = {
     id: crypto.randomUUID(),
     role: "assistant",
     content: "正在准备查询",
     progress: [],
   };
-  messages.value.push(assistantMessage);
+  store.appendMessage(assistantMessage);
   loading.value = true;
+  store.setBusy(true);
+  store.setDraft("");
   agentStep.value = "正在连接查询 Agent";
   await scrollToBottom();
 
@@ -70,18 +87,30 @@ async function askQuestion(value = question.value) {
       (event) => {
         if (event.message) {
           agentStep.value = event.message;
-          assistantMessage.content = event.message;
+          store.updateMessage(assistantMessage.id, (message) => {
+            message.content = event.message || message.content;
+            message.progress = message.progress || [];
+          });
         }
-        if (event.node) assistantMessage.progress?.push(event);
+        if (event.node) {
+          store.updateMessage(assistantMessage.id, (message) => {
+            message.progress = message.progress || [];
+            message.progress.push(event);
+          });
+        }
       },
     );
-    assistantMessage.content = response.final_answer;
-    assistantMessage.response = response;
+    store.updateMessage(assistantMessage.id, (message) => {
+      message.content = response.final_answer;
+      message.response = response;
+    });
   } catch (error) {
-    assistantMessage.content =
-      error instanceof Error ? error.message : "查询服务暂时不可用，请稍后重试。";
+    store.updateMessage(assistantMessage.id, (message) => {
+      message.content = error instanceof Error ? error.message : "查询服务暂时不可用，请稍后重试。";
+    });
   } finally {
     loading.value = false;
+    store.setBusy(false);
     agentStep.value = "正在准备查询";
     await scrollToBottom();
   }

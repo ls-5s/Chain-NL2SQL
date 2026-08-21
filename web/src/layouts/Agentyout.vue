@@ -91,6 +91,7 @@ function closeSearch() {
           <Search :size="18" aria-hidden="true" />
         </button>
         <button
+          v-if="!searchOpen"
           class="agent-sidebar__new-button"
           type="button"
           :disabled="store.isBusy.value"
@@ -450,10 +451,10 @@ function closeSearch() {
     position: fixed;
     top: 0;
     bottom: 0;
-    left: 52px;
+    left: 56px;
     z-index: 91;
-    width: min(304px, calc(100vw - 52px));
-    flex-basis: min(304px, calc(100vw - 52px));
+    width: min(304px, calc(100vw - 56px));
+    flex-basis: min(304px, calc(100vw - 56px));
     box-shadow: 12px 0 28px rgba(0, 0, 0, 0.16);
     transform: translateX(calc(-100% - 8px));
     transition: transform 0.2s ease;
@@ -484,7 +485,7 @@ function closeSearch() {
   .agent-sidebar-toggle {
     position: fixed;
     top: 10px;
-    left: 62px;
+    left: 66px;
     z-index: 10;
     display: grid;
     width: 36px;
@@ -507,12 +508,28 @@ function closeSearch() {
 
   .agent-sidebar-backdrop {
     position: fixed;
-    inset: 0 0 0 52px;
+    inset: 0 0 0 56px;
     z-index: 90;
     display: block;
     border: 0;
     background: rgba(0, 0, 0, 0.26);
     cursor: pointer;
+  }
+}
+
+@media (max-width: 520px) {
+  .agent-sidebar {
+    left: 52px;
+    width: min(304px, calc(100vw - 52px));
+    flex-basis: min(304px, calc(100vw - 52px));
+  }
+
+  .agent-sidebar-toggle {
+    left: 62px;
+  }
+
+  .agent-sidebar-backdrop {
+    inset: 0 0 0 52px;
   }
 }
 </style>
