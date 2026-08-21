@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 
 import { isAuthenticated } from "@/auth/auth";
+import Agentyout from "@/layouts/Agentyout.vue";
 import LoginView from "@/views/LoginView.vue";
 import AgentView from "@/views/AgentView.vue";
 import RagView from "@/views/RagView.vue";
@@ -13,8 +14,12 @@ export const router = createRouter({
     {
       path: "/agent",
       name: "agent",
-      component: AgentView,
-      meta: { navLabel: "Agent", navDescription: "智能数据助理" },
+      component: Agentyout,
+      meta: {
+        navLabel: "Agent",
+        navDescription: "智能数据助理",
+      },
+      children: [{ path: "", name: "agent-home", component: AgentView }],
     },
 
     {

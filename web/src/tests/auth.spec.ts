@@ -30,7 +30,7 @@ describe("demo authentication", () => {
     expect(login({ username: import.meta.env.VITE_DEMO_USERNAME || "admin", password })).toBe(true);
     // Use a changed query to trigger a new navigation after the initial guard redirect.
     await router.push({ name: "login", query: { redirect: "/agent", retry: "1" } });
-    expect(router.currentRoute.value.name).toBe("agent");
+    expect(router.currentRoute.value.name).toBe("agent-home");
   });
 
   it("clears the session on logout and protects business routes again", async () => {
