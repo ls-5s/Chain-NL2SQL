@@ -134,7 +134,8 @@ export function createAgentConversationStore(): AgentConversationStore {
     if (!activeConversationId.value || isBusy.value) return;
     isBusy.value = true;
     const existing = activeDetail.value;
-    if (existing) {
+    const hasHistory = Boolean(existing?.messages.length);
+    if (existing && hasHistory) {
       existing.messages.push(
         { id: `local-user-${Date.now()}`, turn_id: "", role: "user", content: question, status: "succeeded", progress: [], created_at: new Date().toISOString() },
         { id: `local-assistant-${Date.now()}`, turn_id: "", role: "assistant", content: "正在准备查询", status: "running", progress: [], created_at: new Date().toISOString() },
@@ -143,10 +144,12 @@ export function createAgentConversationStore(): AgentConversationStore {
     draft.value = "";
     try {
       await streamConversationQuery(activeConversationId.value, { question, reference_ids: referenceIds }, (event) => {
-        const assistant = activeDetail.value?.messages.at(-1);
-        if (assistant?.role === "assistant") {
-          if (event.message) assistant.content = event.message;
-          if (event.node) assistant.progress.push(event);
+        if (hasHistory) {
+          const assistant = activeDetail.value?.messages.at(-1);
+          if (assistant?.role === "assistant") {
+            if (event.message) assistant.content = event.message;
+            if (event.node) assistant.progress.push(event);
+          }
         }
         onProgress(event);
       });

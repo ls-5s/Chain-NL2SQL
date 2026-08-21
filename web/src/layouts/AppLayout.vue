@@ -7,7 +7,7 @@ import {
   LibraryBig,
   Menu,
   Search,
-  SquarePen,
+  Sparkles,
   UserRound,
   X,
 } from "lucide-vue-next";
@@ -111,7 +111,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleAgentShortcut)
           Agent 对话，打开 Agent"
           aria-describedby="agent-tooltip"
         >
-          <SquarePen :size="24" :stroke-width="1.8" aria-hidden="true" />
+          <span class="agent-icon" aria-hidden="true">
+            <Sparkles :size="18" :stroke-width="1.8" />
+          </span>
           <span id="agent-tooltip" class="rail-tooltip" role="tooltip">
             <span>Agent 对话</span>
           </span>
@@ -166,7 +168,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleAgentShortcut)
       </div>
       <nav class="mobile-navigation__links" aria-label="主导航">
         <RouterLink to="/agent" @click="closeMobileNavigation"
-          ><SquarePen :size="19" />Agent</RouterLink
+          ><span class="agent-icon" aria-hidden="true"><Sparkles :size="17" :stroke-width="1.8" /></span
+          >Agent</RouterLink
         >
         <RouterLink to="/rag" @click="closeMobileNavigation"
           ><LibraryBig :size="19" />RAG 资料库</RouterLink
@@ -394,6 +397,16 @@ kbd {
   background: #f0f0f0;
 }
 
+.agent-icon {
+  display: grid;
+  width: 29px;
+  height: 29px;
+  place-items: center;
+  border-radius: 8px;
+  color: #ffffff;
+  background: #202124;
+}
+
 .rail-link--agent,
 .rail-link--tooltip {
   position: relative;
@@ -565,6 +578,12 @@ kbd {
   .mobile-navigation__links a.router-link-active {
     color: #ffffff;
     background: rgba(255, 255, 255, 0.12);
+  }
+
+  .mobile-navigation__links .agent-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
   }
 }
 

@@ -9,7 +9,6 @@ import {
   LoaderCircle,
   Mic,
   Plus,
-  Sparkles,
 } from "lucide-vue-next";
 
 import { createResultReference, fetchDatabases } from "@/api/client";
@@ -130,34 +129,60 @@ async function scrollToBottom() {
       :class="{ 'conversation-panel--active': messages.length }"
     >
       <div v-if="!messages.length" class="empty-state">
-        <div class="empty-state__icon"><Sparkles :size="26" /></div>
-        <h1>准备好了，随时开始</h1>
-        <p>用自然语言查询演示数据，Chain 会判断是否需要生成只读 SQL。</p>
-        <div class="suggestion-list">
-          <button type="button" @click="askQuestion('查询用户数量')">
-            <span class="suggestion-copy">查询用户数量</span>
-            <span class="suggestion-type suggestion-type--data">数据查询</span>
-          </button>
-          <button type="button" @click="askQuestion('统计各类商品的销售情况')">
-            <span class="suggestion-copy">统计各类商品的销售情况</span>
-            <span class="suggestion-type suggestion-type--data">数据查询</span>
-          </button>
-          <button type="button" @click="askQuestion('查询最近的订单')">
-            <span class="suggestion-copy">查询最近的订单</span>
-            <span class="suggestion-type suggestion-type--data">数据查询</span>
-          </button>
-          <button type="button" @click="askQuestion('按订单状态统计订单数量')">
-            <span class="suggestion-copy">按订单状态统计订单数量</span>
-            <span class="suggestion-type suggestion-type--data">数据查询</span>
-          </button>
-          <button type="button" @click="askQuestion('帮我写一封会议邀请邮件')">
-            <span class="suggestion-copy">帮我写一封会议邀请邮件</span>
-            <span class="suggestion-type suggestion-type--general">通用问答</span>
-          </button>
-          <button type="button" @click="askQuestion('订单情况怎么样？')">
-            <span class="suggestion-copy">订单情况怎么样？</span>
-            <span class="suggestion-type suggestion-type--clarification">需补充信息</span>
-          </button>
+        <div class="empty-state__content">
+          <h1>想先查询什么？</h1>
+          <form class="composer empty-composer" @submit.prevent="handleSubmit">
+            <div class="composer__main">
+              <button
+                class="composer__icon-button"
+                type="button"
+                title="添加附件"
+                aria-label="添加附件"
+                :disabled="loading"
+              >
+                <Plus :size="23" :stroke-width="1.8" />
+              </button>
+              <textarea
+                v-model="question"
+                rows="1"
+                maxlength="2000"
+                placeholder="向 Chain 查询数据"
+                aria-label="输入查询问题"
+                :disabled="loading"
+                @keydown.enter.exact.prevent="handleSubmit"
+              />
+              <div class="composer__actions">
+                <label class="database-picker" title="选择数据源">
+                  <Database :size="17" />
+                  <span class="sr-only">选择数据源</span>
+                  <select v-model="databaseId" :disabled="loading" aria-label="选择数据源">
+                    <option v-for="database in databases" :key="database" :value="database">
+                      {{ database }}
+                    </option>
+                  </select>
+                </label>
+                <button
+                  class="composer__icon-button composer__mic"
+                type="button"
+                title="语音输入"
+                aria-label="语音输入"
+                :disabled="loading"
+                >
+                  <Mic :size="21" :stroke-width="1.8" />
+                </button>
+                <button
+                  class="send-button"
+                  type="submit"
+                  :class="{ 'send-button--loading': loading }"
+                  :disabled="!canSubmit"
+                  aria-label="发送查询"
+                  title="发送查询"
+                >
+                  <AudioLines :size="20" :stroke-width="2" />
+                </button>
+              </div>
+            </div>
+          </form>
         </div>
       </div>
 
@@ -250,7 +275,7 @@ async function scrollToBottom() {
       </div>
     </div>
 
-    <footer class="composer-wrap">
+    <footer v-if="messages.length" class="composer-wrap">
       <form class="composer" @submit.prevent="handleSubmit">
         <div class="composer__main">
           <button
@@ -317,6 +342,11 @@ async function scrollToBottom() {
   overflow: hidden;
   background: #fff;
   color: #202123;
+  font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 .query-topbar {
   display: flex;
@@ -383,91 +413,22 @@ async function scrollToBottom() {
 }
 .empty-state {
   display: flex;
-  min-height: min(550px, calc(100vh - 240px));
+  min-height: 100%;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding-top: 20px;
+  padding: 0 0 7vh;
   text-align: center;
 }
-.empty-state__icon {
-  display: grid;
-  width: 52px;
-  height: 52px;
-  margin-bottom: 20px;
-  place-items: center;
-  border-radius: 15px;
-  color: #fff;
-  background: #202123;
+.empty-state__content {
+  width: min(720px, 100%);
 }
 .empty-state h1 {
   margin: 0;
-  color: #202123;
-  font-size: clamp(27px, 3vw, 34px);
-  font-weight: 500;
+  color: #1f1f1f;
+  font-size: 32px;
+  font-weight: 600;
   letter-spacing: 0;
-}
-.empty-state p {
-  max-width: 480px;
-  margin: 12px 0 24px;
-  color: #8a8a8a;
-  font-size: 13px;
-  line-height: 1.55;
-}
-.suggestion-list {
-  display: grid;
-  width: min(580px, 100%);
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-.suggestion-list button {
-  display: flex;
-  min-height: 42px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  border: 1px solid #e8e8e8;
-  border-radius: 10px;
-  padding: 9px 12px;
-  color: #4d4d4d;
-  background: #fff;
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    border-color 0.16s,
-    background 0.16s,
-    transform 0.16s;
-}
-.suggestion-list button:hover {
-  border-color: #cfcfcf;
-  background: #fafafa;
-  transform: translateY(-1px);
-}
-.suggestion-copy {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.suggestion-type {
-  flex: 0 0 auto;
-  border-radius: 999px;
-  padding: 3px 7px;
-  font-size: 10px;
-  line-height: 1.2;
-  white-space: nowrap;
-}
-.suggestion-type--data {
-  color: #366f9b;
-  background: #eef6fc;
-}
-.suggestion-type--general {
-  color: #327457;
-  background: #edf8f1;
-}
-.suggestion-type--clarification {
-  color: #9a6a2b;
-  background: #fff6e7;
 }
 .message-list {
   display: flex;
@@ -486,7 +447,7 @@ async function scrollToBottom() {
 .message-bubble {
   max-width: min(680px, 100%);
   color: #303030;
-  font-size: 15px;
+  font-size: 21px;
   line-height: 1.72;
 }
 .message-row--user .message-bubble {
@@ -509,7 +470,7 @@ async function scrollToBottom() {
   border-radius: 4px;
   padding: 2px 0;
   background: transparent;
-  font-size: 16px;
+  font-size: 21px;
   line-height: 1.75;
 }
 .message-answer {
@@ -561,7 +522,7 @@ async function scrollToBottom() {
   gap: 12px;
   margin-bottom: 14px;
   color: #777777;
-  font-size: 13px;
+  font-size: 21px;
   font-weight: 700;
   cursor: pointer;
   list-style: none;
@@ -625,13 +586,13 @@ async function scrollToBottom() {
 }
 .reasoning-step strong {
   color: #686868;
-  font-size: 14px;
+  font-size: 21px;
   font-weight: 650;
 }
 .reasoning-step small {
   margin-top: 4px;
   color: #a0a0a0;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.55;
 }
 .reasoning-step code {
@@ -741,14 +702,46 @@ async function scrollToBottom() {
   border: 1px solid #e1e1e1;
   border-radius: 25px;
   background: #fff;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.055);
   transition:
-    border-color 0.16s,
-    box-shadow 0.16s;
+    border-color 0.16s;
+}
+.empty-composer {
+  width: 100%;
+  margin-top: 44px;
+  border-radius: 40px;
+  padding: 12px 14px;
+}
+.empty-composer .composer__main {
+  min-height: 52px;
+  gap: 9px;
+}
+.empty-composer textarea {
+  min-height: 32px;
+  padding: 7px 4px;
+  font-size: 21px;
+}
+.empty-composer .composer__icon-button {
+  width: 42px;
+  height: 42px;
+  flex-basis: 42px;
+}
+.empty-composer .database-picker {
+  height: 42px;
+  padding-inline: 8px;
+  font-size: 14px;
+}
+.empty-composer .send-button {
+  width: 48px;
+  height: 48px;
+  flex-basis: 48px;
+}
+.empty-composer .send-button--loading:disabled {
+  color: #fff;
+  background: #3f82f5;
+  cursor: default;
 }
 .composer:focus-within {
   border-color: #c6c6c6;
-  box-shadow: 0 3px 16px rgba(0, 0, 0, 0.09);
 }
 .composer__main {
   display: flex;
@@ -767,7 +760,7 @@ async function scrollToBottom() {
   resize: none;
   color: #242424;
   background: transparent;
-  font: 15px/1.45 var(--font-sans);
+  font: 21px/1.45 "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
 }
 .composer textarea::placeholder {
   color: #929292;
@@ -906,17 +899,39 @@ async function scrollToBottom() {
     padding-inline: 14px;
   }
   .empty-state {
-    min-height: min(470px, calc(100vh - 220px));
-    padding-top: 0;
+    padding-bottom: 5vh;
   }
   .empty-state h1 {
-    font-size: 27px;
+    font-size: 26px;
   }
-  .empty-state p {
-    max-width: 330px;
+  .empty-composer {
+    margin-top: 30px;
+    border-radius: 30px;
+    padding: 9px 10px;
   }
-  .suggestion-list {
-    grid-template-columns: 1fr;
+  .empty-composer .composer__main {
+    min-height: 46px;
+    gap: 4px;
+  }
+  .empty-composer textarea {
+    min-width: 0;
+    padding-inline: 0;
+    font-size: 18px;
+  }
+  .empty-composer .composer__icon-button {
+    width: 38px;
+    height: 38px;
+    flex-basis: 38px;
+  }
+  .empty-composer .database-picker {
+    gap: 2px;
+    padding-inline: 4px;
+    font-size: 12px;
+  }
+  .empty-composer .send-button {
+    width: 42px;
+    height: 42px;
+    flex-basis: 42px;
   }
   .message-list {
     gap: 25px;
@@ -925,7 +940,7 @@ async function scrollToBottom() {
   }
   .message-bubble {
     max-width: 100%;
-    font-size: 14px;
+    font-size: 18px;
     line-height: 1.7;
   }
   .message-bubble > p {
@@ -934,7 +949,7 @@ async function scrollToBottom() {
     overflow-wrap: normal;
   }
   .message-row--assistant .message-bubble > p {
-    font-size: 14px;
+    font-size: 18px;
     line-height: 1.7;
   }
   .message-answer {
@@ -955,7 +970,7 @@ async function scrollToBottom() {
   }
   .reasoning-timeline__title {
     margin-bottom: 11px;
-    font-size: 11px;
+    font-size: 18px;
   }
   .reasoning-step {
     gap: 9px;
@@ -972,11 +987,11 @@ async function scrollToBottom() {
     flex-basis: 7px;
   }
   .reasoning-step strong {
-    font-size: 12px;
+    font-size: 18px;
   }
   .reasoning-step small {
     margin-top: 2px;
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.5;
   }
   .composer-wrap {
@@ -991,6 +1006,9 @@ async function scrollToBottom() {
   }
   .database-picker select {
     max-width: 50px;
+  }
+  .composer textarea {
+    font-size: 18px;
   }
 }
 </style>

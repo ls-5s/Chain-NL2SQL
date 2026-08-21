@@ -18,6 +18,14 @@ function detail(messages: object[] = []) {
   return { ...summary, messages };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe("agent conversations", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -58,6 +66,58 @@ describe("agent conversations", () => {
       expect.any(Function),
     );
     expect(api.fetchConversation).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the first turn on the empty state until durable history is refreshed", async () => {
+    const completed = deferred<object>();
+    const persistedMessages = [
+      { id: "m1", turn_id: "t1", role: "user", content: "查询用户数量", status: "succeeded", progress: [], created_at: "2026-01-01T00:00:00Z" },
+      { id: "m2", turn_id: "t1", role: "assistant", content: "共有 3 位用户", status: "succeeded", progress: [], created_at: "2026-01-01T00:00:01Z" },
+    ];
+    api.fetchConversation.mockResolvedValueOnce(detail()).mockResolvedValueOnce(detail(persistedMessages));
+    api.streamConversationQuery.mockImplementation(async (_id: string, _payload: object, progress: (event: object) => void) => {
+      progress({ node: "intent_gate", message: "正在理解问题" });
+      return completed.promise;
+    });
+    const store = createAgentConversationStore();
+    await store.initialize();
+
+    const send = store.sendQuestion("查询用户数量", vi.fn());
+
+    expect(store.isBusy.value).toBe(true);
+    expect(store.activeConversation.value.messages).toEqual([]);
+    expect(api.fetchConversation).toHaveBeenCalledTimes(1);
+
+    completed.resolve({ request_id: "r1" });
+    await send;
+
+    expect(api.fetchConversation).toHaveBeenCalledTimes(2);
+    expect(store.activeConversation.value.messages).toEqual(persistedMessages);
+  });
+
+  it("keeps optimistic messages and stream progress for later turns", async () => {
+    const completed = deferred<object>();
+    const history = [
+      { id: "m1", turn_id: "t1", role: "user", content: "上一轮问题", status: "succeeded", progress: [], created_at: "2026-01-01T00:00:00Z" },
+      { id: "m2", turn_id: "t1", role: "assistant", content: "上一轮回答", status: "succeeded", progress: [], created_at: "2026-01-01T00:00:01Z" },
+    ];
+    api.fetchConversation.mockResolvedValue(detail(history));
+    api.streamConversationQuery.mockImplementation(async (_id: string, _payload: object, progress: (event: object) => void) => {
+      progress({ node: "generation", message: "正在生成 SQL" });
+      return completed.promise;
+    });
+    const store = createAgentConversationStore();
+    await store.initialize();
+
+    const send = store.sendQuestion("继续查询", vi.fn());
+
+    const messages = store.activeConversation.value.messages;
+    expect(messages).toHaveLength(4);
+    expect(messages.at(-1)).toMatchObject({ role: "assistant", content: "正在生成 SQL", status: "running" });
+    expect(messages.at(-1)?.progress).toEqual([{ node: "generation", message: "正在生成 SQL" }]);
+
+    completed.resolve({ request_id: "r2" });
+    await send;
   });
 
   it("sends selected result references with the next turn only", async () => {
