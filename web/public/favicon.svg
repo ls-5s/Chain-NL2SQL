@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Chain-NL2SQL">
+  <rect width="64" height="64" rx="14" fill="#bce8cd"/>
+  <path d="M16 19c0-4 7.2-7 16-7s16 3 16 7-7.2 7-16 7-16-3-16-7Z" fill="#10221b"/>
+  <path d="M16 19v13c0 4 7.2 7 16 7s16-3 16-7V19" fill="none" stroke="#10221b" stroke-width="4"/>
+  <path d="M16 32v13c0 4 7.2 7 16 7s16-3 16-7V32" fill="none" stroke="#10221b" stroke-width="4"/>
+</svg>
