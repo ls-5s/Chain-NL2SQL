@@ -5,16 +5,13 @@ import {
   CircleHelp,
   Database,
   LibraryBig,
-  LogOut,
-  MessageCircle,
   Menu,
   Search,
-  Settings2,
   SquarePen,
   UserRound,
   X,
 } from "lucide-vue-next";
-import { getDemoUsername, logout } from "@/auth/auth";
+import { getDemoUsername } from "@/auth/auth";
 
 const router = useRouter();
 const currentUser = getDemoUsername();
@@ -22,11 +19,6 @@ const mobileNavigation = ref<HTMLDialogElement | null>(null);
 
 function openKnowledge() {
   void router.push("/knowledge");
-}
-
-function signOut() {
-  logout();
-  void router.replace("/login");
 }
 
 function closeMobileNavigation() {
@@ -100,12 +92,14 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleAgentShortcut)
           class="rail-link rail-link--agent"
           to="/agent"
           active-class="rail-link--active"
-          aria-label="新聊天，打开 Agent"
+          aria-label="
+
+          Agent 对话，打开 Agent"
           aria-describedby="agent-tooltip"
         >
           <SquarePen :size="24" :stroke-width="1.8" aria-hidden="true" />
           <span id="agent-tooltip" class="rail-tooltip" role="tooltip">
-            <span>新聊天</span><kbd>Ctrl + Shift + O</kbd>
+            <span>Agent 对话</span>
           </span>
         </RouterLink>
         <RouterLink
@@ -120,40 +114,17 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleAgentShortcut)
             RAG 资料库
           </span>
         </RouterLink>
-        <RouterLink
-          class="rail-link rail-link--tooltip"
-          to="/knowledge"
-          active-class="rail-link--active"
-          aria-label="知识库"
-          aria-describedby="knowledge-tooltip"
-        >
-          <MessageCircle :size="25" :stroke-width="1.8" aria-hidden="true" />
-          <span id="knowledge-tooltip" class="rail-tooltip rail-tooltip--label" role="tooltip">
-            知识库
-          </span>
-        </RouterLink>
       </nav>
 
       <div class="rail-bottom">
-        <button class="rail-button" type="button" aria-label="设置" title="设置">
-          <Settings2 :size="22" :stroke-width="1.8" aria-hidden="true" />
-        </button>
-        <button
-          class="rail-button"
-          type="button"
-          aria-label="退出登录"
-          title="退出登录"
-          @click="signOut"
-        >
-          <LogOut :size="22" :stroke-width="1.8" aria-hidden="true" />
-        </button>
         <button
           class="user-button"
           type="button"
           :aria-label="`${currentUser}，本地演示用户`"
-          :title="currentUser"
+          aria-describedby="user-tooltip"
         >
-          {{ currentUser.slice(0, 1).toUpperCase() }}
+          <img src="/user-avatar.jpg" :alt="`${currentUser} 的头像`" />
+          <span id="user-tooltip" class="user-tooltip" role="tooltip">{{ currentUser }}</span>
         </button>
       </div>
     </aside>
@@ -179,9 +150,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleAgentShortcut)
         <RouterLink to="/rag" @click="closeMobileNavigation"
           ><LibraryBig :size="19" />RAG 资料库</RouterLink
         >
-        <RouterLink to="/knowledge" @click="closeMobileNavigation"
-          ><MessageCircle :size="19" />知识库</RouterLink
-        >
         <button
           type="button"
           @click="
@@ -192,9 +160,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleAgentShortcut)
           新建资料
         </button>
       </nav>
-      <button class="mobile-signout" type="button" @click="signOut">
-        <LogOut :size="19" />退出登录
-      </button>
     </dialog>
   </div>
 </template>
@@ -363,7 +328,7 @@ kbd {
   inset: 64px auto 0 0;
   z-index: 20;
   display: flex;
-  width: 72px;
+  width: 56px;
   flex-direction: column;
   align-items: center;
   border-right: 1px solid #ededed;
@@ -385,7 +350,7 @@ kbd {
 
 .rail-logo {
   width: 100%;
-  height: 64px;
+  height: 56px;
   border-bottom: 1px solid #f1f1f1;
 }
 
@@ -401,14 +366,14 @@ kbd {
   width: 100%;
   flex-direction: column;
   align-items: center;
-  gap: 9px;
-  padding-top: 15px;
+  gap: 6px;
+  padding-top: 11px;
 }
 
 .rail-link,
 .rail-button {
-  width: 42px;
-  height: 42px;
+  width: 36px;
+  height: 36px;
   border-radius: 7px;
 }
 
@@ -483,24 +448,58 @@ kbd {
 }
 
 .user-button {
+  position: relative;
+  overflow: visible;
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  color: #ffffff;
-  background: #49765f;
-  font-size: 14px;
-  font-weight: 600;
+  background: #edf3f8;
 }
 
-.user-button:hover {
-  background: #365c49;
+.user-button img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.user-tooltip {
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 12px);
+  z-index: 40;
+  padding: 7px 10px;
+  border: 1px solid #303030;
+  color: #272727;
+  background: #ffffff;
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.08);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  pointer-events: none;
+  transform: translate(-4px, -50%);
+  opacity: 0;
+  visibility: hidden;
+  white-space: nowrap;
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease,
+    visibility 0.16s;
+}
+
+.user-button:hover .user-tooltip,
+.user-button:focus-visible .user-tooltip {
+  visibility: visible;
+  transform: translate(0, -50%);
+  opacity: 1;
 }
 
 .app-main {
   min-width: 0;
   min-height: calc(100vh - 64px);
   margin-top: 64px;
-  margin-left: 72px;
+  margin-left: 56px;
   overflow: auto;
   background: #fafafa;
 }
@@ -563,8 +562,7 @@ kbd {
     margin-top: 34px;
   }
   .mobile-navigation__links a,
-  .mobile-navigation__links button,
-  .mobile-signout {
+  .mobile-navigation__links button {
     display: flex;
     min-height: 42px;
     align-items: center;
@@ -582,10 +580,6 @@ kbd {
   .mobile-navigation__links a.router-link-active {
     color: #ffffff;
     background: rgba(255, 255, 255, 0.12);
-  }
-  .mobile-signout {
-    width: 100%;
-    margin-top: auto;
   }
 }
 
@@ -606,7 +600,7 @@ kbd {
 @media (max-width: 520px) {
   .rail {
     display: flex;
-    width: 60px;
+    width: 52px;
   }
 
   .rail-tooltip {
@@ -616,7 +610,7 @@ kbd {
   .app-main {
     min-height: 100vh;
     margin-top: 0;
-    margin-left: 60px;
+    margin-left: 52px;
   }
 
   .mobile-navigation {

@@ -4,6 +4,7 @@ import { isAuthenticated } from "@/auth/auth";
 import KnowledgeBaseView from "@/views/KnowledgeBaseView.vue";
 import LoginView from "@/views/LoginView.vue";
 import QueryView from "@/views/QueryView.vue";
+import RagView from "@/views/RagView.vue";
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -25,7 +26,7 @@ export const router = createRouter({
     {
       path: "/rag",
       name: "rag",
-      component: KnowledgeBaseView,
+      component: RagView,
       meta: { navLabel: "RAG 资料库", navDescription: "检索增强知识管理" },
     },
     {

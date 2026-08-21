@@ -118,6 +118,14 @@ if (isAuthenticated()) redirectAfterLogin();
           <h2 id="login-title">欢迎回来</h2>
           <p>登录后继续使用数据问答与知识库。</p>
         </div>
+        <div class="status-track" aria-hidden="true">
+          <span class="status-track__item status-track__item--ready"><i />安全会话已就绪</span>
+          <span class="status-track__item status-track__item--connecting"
+            ><i />正在连接数据工作区</span
+          >
+          <span class="status-track__item status-track__item--local"><i />本地受控访问</span>
+        </div>
+        <p class="status-track__sr">安全会话已就绪。</p>
         <form class="login-form" :aria-busy="submitting" @submit.prevent="submit">
           <div class="form-field">
             <label class="field-label" for="username">用户名</label>
@@ -201,7 +209,12 @@ if (isAuthenticated()) redirectAfterLogin();
   top: 7%;
   border: 1px solid rgba(188, 239, 205, 0.2);
   border-radius: 50%;
-  background: conic-gradient(from 90deg, transparent 0 61%, rgba(178, 237, 197, 0.18) 69%, transparent 78%);
+  background: conic-gradient(
+    from 90deg,
+    transparent 0 61%,
+    rgba(178, 237, 197, 0.18) 69%,
+    transparent 78%
+  );
   box-shadow: 0 0 70px rgba(99, 191, 130, 0.08);
   opacity: 0;
   transform: scale(0.76);
@@ -227,11 +240,40 @@ if (isAuthenticated()) redirectAfterLogin();
   border-radius: 50%;
   content: "";
 }
-.startup-radar::before { inset: 22%; }
-.startup-radar::after { inset: 42%; }
-.startup-radar i:first-child { inset: -1px; border-color: rgba(171, 234, 191, 0.24); animation: radar-spin 5s linear infinite 1200ms; }
-.startup-radar i:nth-child(2) { width: 6px; height: 6px; left: 26%; top: 35%; border: 0; background: #9be1b0; box-shadow: 0 0 0 5px rgba(155, 225, 176, 0.12), 0 0 14px rgba(155, 225, 176, 0.7); animation: radar-node 1.8s ease-out 730ms both; }
-.startup-radar i:last-child { width: 2px; height: 48%; left: 50%; top: 2%; border: 0; border-radius: 0; transform-origin: bottom; background: linear-gradient(transparent, rgba(175, 242, 197, 0.75)); animation: radar-sweep 1.8s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.startup-radar::before {
+  inset: 22%;
+}
+.startup-radar::after {
+  inset: 42%;
+}
+.startup-radar i:first-child {
+  inset: -1px;
+  border-color: rgba(171, 234, 191, 0.24);
+  animation: radar-spin 5s linear infinite 1200ms;
+}
+.startup-radar i:nth-child(2) {
+  width: 6px;
+  height: 6px;
+  left: 26%;
+  top: 35%;
+  border: 0;
+  background: #9be1b0;
+  box-shadow:
+    0 0 0 5px rgba(155, 225, 176, 0.12),
+    0 0 14px rgba(155, 225, 176, 0.7);
+  animation: radar-node 1.8s ease-out 730ms both;
+}
+.startup-radar i:last-child {
+  width: 2px;
+  height: 48%;
+  left: 50%;
+  top: 2%;
+  border: 0;
+  border-radius: 0;
+  transform-origin: bottom;
+  background: linear-gradient(transparent, rgba(175, 242, 197, 0.75));
+  animation: radar-sweep 1.8s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
 .startup-caption {
   position: absolute;
   display: flex;
@@ -249,7 +291,9 @@ if (isAuthenticated()) redirectAfterLogin();
   opacity: 0;
   animation: startup-caption-in 360ms ease-out 860ms both;
 }
-.startup-caption b { color: #a9e5ba; font-weight: 800; }
+.startup-caption b {
+  color: #a9e5ba;
+  font-weight: 800;
 }
 .login-story {
   position: relative;
@@ -342,6 +386,7 @@ if (isAuthenticated()) redirectAfterLogin();
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.13em;
+  animation: kicker-breathe 6s ease-in-out infinite 1.4s;
 }
 .story-copy h1 {
   margin: 0;
@@ -351,8 +396,22 @@ if (isAuthenticated()) redirectAfterLogin();
   line-height: 1.03;
 }
 .story-copy h1 em {
+  display: inline-block;
   color: #bde9ce;
+  background: linear-gradient(
+    100deg,
+    #a8dcb8 0%,
+    #d9f8e4 38%,
+    #bde9ce 54%,
+    #92caab 78%,
+    #bde9ce 100%
+  );
+  background-size: 240% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
   font-style: normal;
+  animation: answer-glow 7s ease-in-out infinite 1.8s;
 }
 .story-description {
   max-width: 360px;
@@ -360,6 +419,7 @@ if (isAuthenticated()) redirectAfterLogin();
   color: #a1b7a9;
   font-size: 15px;
   line-height: 1.75;
+  animation: description-breathe 7s ease-in-out infinite 2.1s;
 }
 .signal-row {
   display: flex;
@@ -373,6 +433,13 @@ if (isAuthenticated()) redirectAfterLogin();
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  animation: signal-breathe 6.6s ease-in-out infinite;
+}
+.signal-row span:nth-of-type(2) {
+  animation-delay: 1.2s;
+}
+.signal-row span:nth-of-type(3) {
+  animation-delay: 2.4s;
 }
 .signal-row svg {
   color: #8ac49b;
@@ -404,7 +471,7 @@ if (isAuthenticated()) redirectAfterLogin();
   background: linear-gradient(90deg, transparent, #b7efca, transparent);
   box-shadow: 0 0 11px rgba(183, 239, 202, 0.85);
   opacity: 0;
-  animation: query-scan 760ms ease-out 1270ms both;
+  animation: query-scan 6.8s ease-in-out 1.3s infinite;
 }
 .preview-header {
   display: flex;
@@ -443,6 +510,14 @@ if (isAuthenticated()) redirectAfterLogin();
   padding: 20px 16px 17px;
   color: #eff8f1;
   font-size: 14px;
+}
+.preview-prompt > span:nth-child(2) {
+  background: linear-gradient(100deg, #d5e6d9 0%, #f5fff6 42%, #b7e9c7 58%, #d5e6d9 100%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: query-text-flow 7.4s ease-in-out infinite 2.5s;
 }
 .prompt-symbol {
   color: #9de2b0;
@@ -527,9 +602,23 @@ if (isAuthenticated()) redirectAfterLogin();
 .login-panel {
   position: relative;
   display: grid;
+  overflow: hidden;
   place-items: center;
   padding: 48px clamp(32px, 7vw, 108px);
   background: #f7f8f6;
+}
+.login-panel::before {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  content: "";
+  opacity: 0.54;
+  background-image:
+    linear-gradient(rgba(71, 124, 89, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(71, 124, 89, 0.045) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: linear-gradient(150deg, transparent 4%, #000 55%, transparent 100%);
+  animation: panel-grid-drift 15s linear infinite alternate;
 }
 .login-panel::after {
   position: absolute;
@@ -542,7 +631,7 @@ if (isAuthenticated()) redirectAfterLogin();
   background: #92dca8;
   box-shadow: 0 0 16px rgba(109, 198, 137, 0.72);
   opacity: 0;
-  animation: panel-scan 1180ms cubic-bezier(0.2, 0.76, 0.25, 1) 270ms both;
+  animation: panel-scan 7.6s cubic-bezier(0.2, 0.76, 0.25, 1) 720ms infinite;
 }
 .login-panel__inner {
   position: relative;
@@ -570,15 +659,74 @@ if (isAuthenticated()) redirectAfterLogin();
 .login-heading h2 {
   margin: 0;
   color: #17241d;
+  background: linear-gradient(105deg, #17241d 0%, #17241d 43%, #4a8d65 54%, #17241d 65%);
+  background-size: 240% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
   font-size: clamp(31px, 3vw, 41px);
   font-weight: 720;
   line-height: 1.12;
+  animation: heading-flow 8s ease-in-out infinite 1.8s;
 }
 .login-heading > p:last-child {
   margin: 12px 0 0;
   color: #75827a;
   font-size: 14px;
   line-height: 1.65;
+}
+.status-track {
+  position: relative;
+  height: 30px;
+  margin: -21px 0 27px;
+  border-left: 1px solid #a9d8b7;
+  color: #537260;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+.status-track::after {
+  position: absolute;
+  width: 48px;
+  height: 1px;
+  left: -1px;
+  bottom: 0;
+  content: "";
+  background: linear-gradient(90deg, #9ad8ae, transparent);
+  animation: status-line-flow 6s ease-in-out infinite;
+}
+.status-track__item {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  left: 13px;
+  top: 2px;
+  opacity: 0;
+  transform: translateY(5px);
+  animation: status-cycle 9s ease-in-out infinite;
+}
+.status-track__item i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #67b47e;
+  box-shadow: 0 0 0 4px rgba(103, 180, 126, 0.1);
+}
+.status-track__item--connecting {
+  animation-delay: -3s;
+}
+.status-track__item--local {
+  animation-delay: -6s;
+}
+.status-track__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .login-form {
   display: flex;
@@ -709,6 +857,105 @@ if (isAuthenticated()) redirectAfterLogin();
     transform: rotate(360deg);
   }
 }
+@keyframes answer-glow {
+  0%,
+  100% {
+    background-position: 0% 50%;
+    transform: translateY(0);
+  }
+  50% {
+    background-position: 100% 50%;
+    transform: translateY(-2px);
+  }
+}
+@keyframes kicker-breathe {
+  0%,
+  100% {
+    color: #a9d5b8;
+    opacity: 0.76;
+  }
+  50% {
+    color: #c1ebcf;
+    opacity: 1;
+  }
+}
+@keyframes description-breathe {
+  0%,
+  100% {
+    color: #a1b7a9;
+    opacity: 0.72;
+  }
+  50% {
+    color: #bfd2c4;
+    opacity: 1;
+  }
+}
+@keyframes signal-breathe {
+  0%,
+  100% {
+    color: #8eaa98;
+    transform: translateY(0);
+  }
+  50% {
+    color: #c0dcc8;
+    transform: translateY(-1px);
+  }
+}
+@keyframes query-text-flow {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+@keyframes heading-flow {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+@keyframes status-cycle {
+  0%,
+  27% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  34%,
+  100% {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+}
+@keyframes status-line-flow {
+  0%,
+  100% {
+    opacity: 0.38;
+    transform: scaleX(0.68);
+    transform-origin: left;
+  }
+  50% {
+    opacity: 1;
+    transform: scaleX(1);
+    transform-origin: left;
+  }
+}
+@keyframes panel-grid-drift {
+  from {
+    background-position:
+      0 0,
+      0 0;
+  }
+  to {
+    background-position:
+      56px 28px,
+      56px 28px;
+  }
+}
 @keyframes login-reveal {
   from {
     opacity: 0;
@@ -736,26 +983,60 @@ if (isAuthenticated()) redirectAfterLogin();
   }
 }
 @keyframes startup-radar-in {
-  from { opacity: 0; transform: scale(0.76); }
-  to { opacity: 1; transform: scale(1); }
+  from {
+    opacity: 0;
+    transform: scale(0.76);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 @keyframes startup-caption-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 @keyframes radar-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 @keyframes radar-node {
-  0%, 38% { opacity: 0; transform: scale(0.3); }
-  58% { opacity: 1; transform: scale(1); }
-  100% { opacity: 1; transform: scale(1); }
+  0%,
+  38% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  58% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 @keyframes radar-sweep {
-  0% { opacity: 0; transform: rotate(-138deg); }
-  16% { opacity: 0.9; }
-  78% { opacity: 0.72; }
-  100% { opacity: 0; transform: rotate(138deg); }
+  0% {
+    opacity: 0;
+    transform: rotate(-138deg);
+  }
+  16% {
+    opacity: 0.9;
+  }
+  78% {
+    opacity: 0.72;
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(138deg);
+  }
 }
 @keyframes panel-scan {
   0% {
@@ -931,6 +1212,9 @@ if (isAuthenticated()) redirectAfterLogin();
   .login-heading h2 {
     font-size: 30px;
   }
+  .status-track {
+    margin-bottom: 24px;
+  }
   .login-form {
     gap: 19px;
   }
@@ -968,7 +1252,16 @@ if (isAuthenticated()) redirectAfterLogin();
   .story-orbit,
   .preview-status i,
   .query-preview::after,
-  .login-panel::after {
+  .login-panel::after,
+  .login-panel::before,
+  .story-kicker,
+  .story-copy h1 em,
+  .story-description,
+  .signal-row span,
+  .preview-prompt > span:nth-child(2),
+  .login-heading h2,
+  .status-track::after,
+  .status-track__item {
     animation: none;
   }
   .login-reveal {
@@ -977,6 +1270,20 @@ if (isAuthenticated()) redirectAfterLogin();
   }
   .startup-sequence {
     display: none;
+  }
+  .story-copy h1 em,
+  .preview-prompt > span:nth-child(2),
+  .login-heading h2 {
+    background: none;
+    -webkit-text-fill-color: currentcolor;
+  }
+  .status-track__item {
+    display: none;
+  }
+  .status-track__item--ready {
+    display: inline-flex;
+    opacity: 1;
+    transform: none;
   }
 }
 </style>
