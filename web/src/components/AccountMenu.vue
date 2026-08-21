@@ -42,7 +42,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleEscape));
     <div v-if="open" class="account-menu-layer" @mousedown.self="close">
       <section class="account-menu" aria-label="账户菜单" @mousedown.stop>
         <button class="account-menu__profile" type="button">
-          <span class="account-menu__avatar" aria-hidden="true">{{ username.slice(0, 2).toUpperCase() }}</span>
+          <img class="account-menu__avatar" src="/user-avatar.jpg" alt="" />
           <span><strong>{{ username }}</strong><small>Plus</small></span>
           <ChevronRight :size="22" :stroke-width="1.8" aria-hidden="true" />
         </button>
@@ -118,16 +118,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleEscape));
 }
 
 .account-menu__avatar {
-  display: grid;
   width: 36px;
   height: 36px;
   flex: 0 0 auto;
   border-radius: 50%;
-  place-items: center;
-  color: #ffffff;
-  background: #2f8bc1;
-  font-size: 13px;
-  font-weight: 500;
+  object-fit: cover;
 }
 
 .account-menu__profile > span:not(.account-menu__avatar) {

@@ -1,9 +1,8 @@
 import { createRouter, createWebHistory } from "vue-router";
 
 import { isAuthenticated } from "@/auth/auth";
-import KnowledgeBaseView from "@/views/KnowledgeBaseView.vue";
 import LoginView from "@/views/LoginView.vue";
-import QueryView from "@/views/QueryView.vue";
+import AgentView from "@/views/AgentView.vue";
 import RagView from "@/views/RagView.vue";
 
 export const router = createRouter({
@@ -14,26 +13,15 @@ export const router = createRouter({
     {
       path: "/agent",
       name: "agent",
-      component: QueryView,
+      component: AgentView,
       meta: { navLabel: "Agent", navDescription: "智能数据助理" },
     },
-    {
-      path: "/query",
-      name: "query",
-      component: QueryView,
-      meta: { navLabel: "数据问答", navDescription: "自然语言查询" },
-    },
+
     {
       path: "/rag",
       name: "rag",
       component: RagView,
       meta: { navLabel: "RAG 资料库", navDescription: "检索增强知识管理" },
-    },
-    {
-      path: "/knowledge",
-      name: "knowledge",
-      component: KnowledgeBaseView,
-      meta: { navLabel: "知识库", navDescription: "业务规则与数据字典" },
     },
   ],
 });
@@ -48,7 +36,7 @@ router.beforeEach((to) => {
       !redirect.startsWith("//") &&
       redirect !== "/login"
       ? redirect
-      : "/query";
+      : "/agent";
   }
   if (!authenticated) return { name: "login", query: { redirect: to.fullPath } };
   return true;

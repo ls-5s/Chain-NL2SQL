@@ -140,7 +140,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleAgentShortcut)
           aria-describedby="user-tooltip"
           @click="toggleProfileMenu"
         >
-          {{ currentUser.slice(0, 2).toUpperCase() }}
+          <img class="user-button__avatar" src="/user-avatar.jpg" alt="" />
           <span id="user-tooltip" class="rail-tooltip rail-tooltip--label" role="tooltip">
             {{ currentUser }}
           </span>
@@ -471,6 +471,13 @@ kbd {
   background: #2f8bc1;
   font-size: 13px;
   font-weight: 700;
+}
+
+.user-button__avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
 }
 
 .app-main {
