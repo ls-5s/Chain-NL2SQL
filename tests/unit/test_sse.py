@@ -1,6 +1,9 @@
 import asyncio
 import json
+import logging
 from pathlib import Path
+
+import pytest
 
 from app.api.authorization import AccessPolicy
 from app.api.routes import _stream_graph
@@ -118,3 +121,47 @@ def test_sse_model_failure_emits_error_event() -> None:
 
     assert [name for name, _ in result] == ["start", "error"]
     assert result[-1][1]["status_code"] == 502
+
+
+def test_sse_model_failure_logs_context_without_credentials(caplog) -> None:
+    database = SQLiteAdapter("demo", str(ROOT / "data" / "demo.sqlite"))
+    graph = build_query_graph(
+        database_executor=database,
+        llm_client=FakeLLM([RuntimeError("api_key=sk-secret-value provider unavailable")]),
+        schema_retriever=SQLiteSchemaRetriever(database),
+        access_policy=policy(),
+        query_timeout_seconds=15,
+    )
+
+    with caplog.at_level(logging.ERROR, logger="app.api.routes"):
+        result = events(run_stream(graph, state("这个事情怎么处理"), database))
+
+    assert result[-1][1]["status_code"] == 502
+    assert "RuntimeError" in caplog.text
+    assert "request_id=sse-test" in caplog.text
+    assert "sk-secret-value" not in caplog.text
+
+
+def test_sse_cancellation_calls_error_callback_and_propagates() -> None:
+    class CancelledGraph:
+        async def astream(self, state, stream_mode):
+            raise asyncio.CancelledError()
+            yield {}
+
+    database = SQLiteAdapter("demo", str(ROOT / "data" / "demo.sqlite"))
+    errors: list[str] = []
+
+    async def collect() -> None:
+        async for _ in _stream_graph(
+            CancelledGraph(),
+            state("你好"),
+            database,
+            start_data={"conversation_id": "conversation-1", "turn_id": "turn-1"},
+            on_error=errors.append,
+        ):
+            pass
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(collect())
+
+    assert errors == ["The NL2SQL agent request was cancelled."]

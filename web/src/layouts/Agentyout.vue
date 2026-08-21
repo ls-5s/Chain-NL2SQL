@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+  type ComponentPublicInstance,
+} from "vue";
 import {
   Clock3,
   Ellipsis,
@@ -29,6 +37,7 @@ const conversationTitleViewportRefs = new Map<string, HTMLSpanElement>();
 const overflowingConversationIds = ref<Record<string, boolean>>({});
 const conversationMarqueeDistances = ref<Record<string, number>>({});
 let titleResizeObserver: ResizeObserver | null = null;
+let measurementScheduled = false;
 
 const filteredConversations = computed(() => {
   const query = searchQuery.value.trim().toLocaleLowerCase();
@@ -86,16 +95,17 @@ function openSearch() {
   void nextTick(() => searchInput.value?.focus());
 }
 
-function setConversationTitleRef(id: string, element: Element | null) {
+type TemplateRefValue = Element | ComponentPublicInstance | null;
+
+function setConversationTitleRef(id: string, element: TemplateRefValue) {
   if (element instanceof HTMLSpanElement) {
     conversationTitleRefs.set(id, element);
   } else {
     conversationTitleRefs.delete(id);
   }
-  requestConversationTitleMeasurement();
 }
 
-function setConversationTitleViewportRef(id: string, element: Element | null) {
+function setConversationTitleViewportRef(id: string, element: TemplateRefValue) {
   const previous = conversationTitleViewportRefs.get(id);
   if (previous && titleResizeObserver) titleResizeObserver.unobserve(previous);
 
@@ -105,11 +115,22 @@ function setConversationTitleViewportRef(id: string, element: Element | null) {
   } else {
     conversationTitleViewportRefs.delete(id);
   }
-  requestConversationTitleMeasurement();
 }
 
 function requestConversationTitleMeasurement() {
-  void nextTick(measureConversationTitles);
+  if (measurementScheduled) return;
+  measurementScheduled = true;
+  void nextTick(() => {
+    measurementScheduled = false;
+    measureConversationTitles();
+  });
+}
+
+function recordsEqual<T extends boolean | number>(left: Record<string, T>, right: Record<string, T>) {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key) => left[key] === right[key]);
 }
 
 function measureConversationTitles() {
@@ -126,8 +147,12 @@ function measureConversationTitles() {
     nextDistances[conversation.id] = distance;
   }
 
-  overflowingConversationIds.value = nextOverflowing;
-  conversationMarqueeDistances.value = nextDistances;
+  if (!recordsEqual(overflowingConversationIds.value, nextOverflowing)) {
+    overflowingConversationIds.value = nextOverflowing;
+  }
+  if (!recordsEqual(conversationMarqueeDistances.value, nextDistances)) {
+    conversationMarqueeDistances.value = nextDistances;
+  }
 }
 
 function isConversationTitleOverflowing(id: string) {
@@ -233,6 +258,13 @@ onBeforeUnmount(() => {
           <SquarePen :size="20" :stroke-width="1.9" aria-hidden="true" />
           <span>新聊天</span>
         </button>
+
+        <div v-if="store.initializationError.value" class="agent-sidebar__load-error" role="alert">
+          <span>{{ store.initializationError.value }}</span>
+          <button type="button" :disabled="store.isBusy.value" @click="store.initialize">
+            重试加载
+          </button>
+        </div>
 
         <nav class="agent-sidebar__shortcuts" aria-label="Agent 功能">
           <button
@@ -511,6 +543,41 @@ onBeforeUnmount(() => {
   padding: 1px 9px 16px;
   scrollbar-color: #cccccc transparent;
   scrollbar-width: thin;
+}
+
+.agent-sidebar__load-error {
+  display: grid;
+  gap: 8px;
+  margin: 10px 5px 12px;
+  border: 1px solid #f0d6d6;
+  border-radius: 7px;
+  padding: 10px;
+  color: #9b3f3f;
+  background: #fff7f7;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.agent-sidebar__load-error button {
+  width: fit-content;
+  border: 0;
+  border-radius: 5px;
+  padding: 5px 8px;
+  color: #8c3030;
+  background: #f9e4e4;
+  font: inherit;
+  cursor: pointer;
+}
+
+.agent-sidebar__load-error button:hover:not(:disabled),
+.agent-sidebar__load-error button:focus-visible {
+  outline: 0;
+  background: #f2d4d4;
+}
+
+.agent-sidebar__load-error button:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .agent-sidebar__body::-webkit-scrollbar {

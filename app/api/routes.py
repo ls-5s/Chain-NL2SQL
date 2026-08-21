@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 from collections.abc import AsyncIterator
@@ -29,6 +30,8 @@ from app.schemas.response import (
     HealthResponse,
     ResultReferenceResponse,
 )
+from app.errors.redactor import redact_error
+from app.observability.logging import get_logger
 
 api_router = APIRouter(prefix="/api/v1", tags=["nl2sql"])
 system_router = APIRouter(tags=["system"])
@@ -37,6 +40,63 @@ _provider_lock = threading.Lock()
 _embedding_providers: dict[str, SentenceTransformerEmbedding] = {}
 _reranker_providers: dict[str, SentenceTransformerReranker] = {}
 _conversation_repositories: dict[str, ConversationRepository] = {}
+logger = get_logger(__name__)
+
+_GENERIC_AGENT_ERROR = "The NL2SQL agent could not complete the query."
+_CANCELLED_AGENT_ERROR = "The NL2SQL agent request was cancelled."
+
+
+def _exception_status_code(error: BaseException) -> int | None:
+    status_code = getattr(error, "status_code", None)
+    if isinstance(status_code, int) and 100 <= status_code <= 599:
+        return status_code
+    response = getattr(error, "response", None)
+    response_status = getattr(response, "status_code", None)
+    return response_status if isinstance(response_status, int) and 100 <= response_status <= 599 else None
+
+
+def _log_agent_exception(
+    error: BaseException,
+    *,
+    request_id: str,
+    conversation_id: str | None = None,
+    turn_id: str | None = None,
+    node: str | None = None,
+    cancelled: bool = False,
+) -> None:
+    # 只记录异常类型、供应商状态码和脱敏后的短摘要，避免日志成为密钥或原始响应的出口。
+    summary = redact_error(str(error))[:500]
+    logger.error(
+        "Agent request failed request_id=%s conversation_id=%s turn_id=%s node=%s "
+        "exception_type=%s provider_status=%s cancelled=%s detail=%s",
+        request_id,
+        conversation_id or "-",
+        turn_id or "-",
+        node or "-",
+        type(error).__name__,
+        _exception_status_code(error) or "-",
+        cancelled,
+        summary or "-",
+    )
+
+
+def _finish_turn_safely(
+    repository: ConversationRepository,
+    turn: dict[str, Any],
+    error: str,
+    *,
+    request_id: str,
+) -> None:
+    try:
+        repository.finish_turn(turn["turn_id"], turn["assistant_message_id"], None, error)
+    except Exception as finish_error:
+        _log_agent_exception(
+            finish_error,
+            request_id=request_id,
+            conversation_id=turn.get("conversation_id"),
+            turn_id=turn.get("turn_id"),
+            node="finish_turn",
+        )
 
 
 @system_router.get("/health", response_model=HealthResponse)
@@ -184,24 +244,43 @@ async def conversation_query(
         turn = repository.start_turn(context.user_id, conversation_id, payload.question, conversation_context)
     except ConversationNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation was not found.") from error
+    except Exception as error:
+        _log_agent_exception(error, request_id=context.request_id, conversation_id=conversation_id, node="build_context")
+        raise HTTPException(status_code=502, detail=_GENERIC_AGENT_ERROR) from error
     try:
         graph, database = _create_graph_runtime(settings, context, turn["database_id"])
     except LLMConfigurationError as error:
-        repository.finish_turn(turn["turn_id"], turn["assistant_message_id"], None, "LLM service is not configured.")
+        _log_agent_exception(error, request_id=context.request_id, conversation_id=conversation_id, turn_id=turn["turn_id"], node="create_graph_runtime")
+        _finish_turn_safely(repository, turn, "LLM service is not configured.", request_id=context.request_id)
         raise HTTPException(status_code=503, detail="LLM service is not configured.") from error
     except ValueError as error:
-        repository.finish_turn(turn["turn_id"], turn["assistant_message_id"], None, str(error))
-        raise HTTPException(status_code=400, detail=str(error)) from error
+        _log_agent_exception(error, request_id=context.request_id, conversation_id=conversation_id, turn_id=turn["turn_id"], node="create_graph_runtime")
+        _finish_turn_safely(repository, turn, "The query service configuration is invalid.", request_id=context.request_id)
+        raise HTTPException(status_code=503, detail="The query service configuration is invalid.") from error
+    except Exception as error:
+        _log_agent_exception(error, request_id=context.request_id, conversation_id=conversation_id, turn_id=turn["turn_id"], node="create_graph_runtime")
+        _finish_turn_safely(repository, turn, _GENERIC_AGENT_ERROR, request_id=context.request_id)
+        raise HTTPException(status_code=502, detail=_GENERIC_AGENT_ERROR) from error
 
-    state = create_initial_state(
-        request_id=context.request_id,
-        question=payload.question,
-        database_id=turn["database_id"],
-        dialect="sqlite",
-        max_iterations=payload.max_iterations or settings.max_iterations,
-        conversation_context=conversation_context,
-        bound_parameters=bindings,
-    )
+    try:
+        state = create_initial_state(
+            request_id=context.request_id,
+            question=payload.question,
+            database_id=turn["database_id"],
+            dialect="sqlite",
+            max_iterations=payload.max_iterations or settings.max_iterations,
+            conversation_context=conversation_context,
+            bound_parameters=bindings,
+        )
+    except Exception as error:
+        database.close()
+        _log_agent_exception(error, request_id=context.request_id, conversation_id=conversation_id, turn_id=turn["turn_id"], node="create_initial_state")
+        _finish_turn_safely(repository, turn, _GENERIC_AGENT_ERROR, request_id=context.request_id)
+        raise HTTPException(status_code=502, detail=_GENERIC_AGENT_ERROR) from error
+
+    def finish_error(detail: str) -> None:
+        _finish_turn_safely(repository, turn, detail, request_id=context.request_id)
+
     return StreamingResponse(
         _stream_graph(
             graph,
@@ -210,7 +289,7 @@ async def conversation_query(
             start_data={"conversation_id": conversation_id, "turn_id": turn["turn_id"], "message_id": turn["assistant_message_id"]},
             on_progress=lambda item: repository.append_progress(turn["assistant_message_id"], item),
             on_complete=lambda response: repository.finish_turn(turn["turn_id"], turn["assistant_message_id"], response),
-            on_error=lambda detail: repository.finish_turn(turn["turn_id"], turn["assistant_message_id"], None, detail),
+            on_error=finish_error,
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
@@ -228,10 +307,12 @@ async def _stream_graph(
     on_error: Callable[[str], None] | None = None,
 ) -> AsyncIterator[str]:
     current_state: dict[str, Any] = dict(state)
+    current_node: str | None = None
     try:
         yield _sse("start", {"request_id": state["request_id"], **(start_data or {})})
         async for update in graph.astream(state, stream_mode="updates"):
             for node, node_update in update.items():
+                current_node = node
                 current_state.update(node_update)
                 progress: dict[str, Any] = {
                     "request_id": state["request_id"],
@@ -268,14 +349,40 @@ async def _stream_graph(
         if on_complete:
             on_complete(response)
         yield _sse("complete", response.model_dump(mode="json"))
-    except LLMConfigurationError:
+    except asyncio.CancelledError as error:
+        _log_agent_exception(
+            error,
+            request_id=state["request_id"],
+            conversation_id=(start_data or {}).get("conversation_id"),
+            turn_id=(start_data or {}).get("turn_id"),
+            node=current_node,
+            cancelled=True,
+        )
+        if on_error:
+            on_error(_CANCELLED_AGENT_ERROR)
+        raise
+    except LLMConfigurationError as error:
+        _log_agent_exception(
+            error,
+            request_id=state["request_id"],
+            conversation_id=(start_data or {}).get("conversation_id"),
+            turn_id=(start_data or {}).get("turn_id"),
+            node=current_node,
+        )
         if on_error:
             on_error("LLM service is not configured.")
         yield _sse("error", {"status_code": 503, "detail": "LLM service is not configured."})
-    except Exception:
+    except Exception as error:
+        _log_agent_exception(
+            error,
+            request_id=state["request_id"],
+            conversation_id=(start_data or {}).get("conversation_id"),
+            turn_id=(start_data or {}).get("turn_id"),
+            node=current_node,
+        )
         if on_error:
-            on_error("The NL2SQL agent could not complete the query.")
-        yield _sse("error", {"status_code": 502, "detail": "The NL2SQL agent could not complete the query."})
+            on_error(_GENERIC_AGENT_ERROR)
+        yield _sse("error", {"status_code": 502, "detail": _GENERIC_AGENT_ERROR})
     finally:
         database.close()
 
@@ -333,31 +440,35 @@ def _create_graph_runtime(settings: Settings, context: RequestContext, database_
     if database_id != "demo":
         raise ValueError("Database adapter is not configured.")
     database = SQLiteAdapter(database_id, settings.demo_database_path, settings.result_row_limit)
-    llm_client = create_openai_client(settings)
+    try:
+        llm_client = create_openai_client(settings)
 
-    def embedding_factory() -> SentenceTransformerEmbedding:
-        return _embedding_provider(settings)
+        def embedding_factory() -> SentenceTransformerEmbedding:
+            return _embedding_provider(settings)
 
-    def reranker_factory() -> SentenceTransformerReranker:
-        name = settings.schema_reranker_model
-        with _provider_lock:
-            provider = _reranker_providers.get(name)
-            if provider is None:
-                provider = SentenceTransformerReranker(name)
-                _reranker_providers[name] = provider
-            return provider
+        def reranker_factory() -> SentenceTransformerReranker:
+            name = settings.schema_reranker_model
+            with _provider_lock:
+                provider = _reranker_providers.get(name)
+                if provider is None:
+                    provider = SentenceTransformerReranker(name)
+                    _reranker_providers[name] = provider
+                return provider
 
-    schema_retriever = SchemaIndexManager(
-        database.inspect_schema, root=settings.schema_index_root, mode=settings.schema_retrieval_mode,
-        top_k=settings.schema_top_k, fallback_mode=settings.schema_fallback_mode,
-        embedding_factory=embedding_factory, reranker_factory=reranker_factory,
-        embedding_model_name=settings.schema_embedding_model, reranker_model_name=settings.schema_reranker_model,
-    )
-    return build_query_graph(
-        database_executor=database, llm_client=llm_client, schema_retriever=schema_retriever,
-        access_policy=context.access_policy, query_timeout_seconds=settings.query_timeout_seconds,
-        intent_confidence_threshold=settings.intent_confidence_threshold,
-    ), database
+        schema_retriever = SchemaIndexManager(
+            database.inspect_schema, root=settings.schema_index_root, mode=settings.schema_retrieval_mode,
+            top_k=settings.schema_top_k, fallback_mode=settings.schema_fallback_mode,
+            embedding_factory=embedding_factory, reranker_factory=reranker_factory,
+            embedding_model_name=settings.schema_embedding_model, reranker_model_name=settings.schema_reranker_model,
+        )
+        return build_query_graph(
+            database_executor=database, llm_client=llm_client, schema_retriever=schema_retriever,
+            access_policy=context.access_policy, query_timeout_seconds=settings.query_timeout_seconds,
+            intent_confidence_threshold=settings.intent_confidence_threshold,
+        ), database
+    except Exception:
+        database.close()
+        raise
 
 
 def _node_message(node: str) -> str:

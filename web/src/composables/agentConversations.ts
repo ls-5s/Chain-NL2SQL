@@ -7,7 +7,7 @@ import {
   fetchConversations,
   streamConversationQuery,
 } from "@/api/client";
-import type { ConversationDetail, ConversationMessage, ConversationSummary, QueryStreamEvent } from "@/types/api";
+import type { ConversationDetail, ConversationMessage, ConversationSummary, QueryResponse, QueryStreamEvent } from "@/types/api";
 
 const DEFAULT_DATABASE_ID = "demo";
 
@@ -29,6 +29,7 @@ export interface AgentConversationStore {
   activeConversation: ComputedRef<AgentConversation>;
   recentConversations: ComputedRef<ConversationSummary[]>;
   isBusy: Ref<boolean>;
+  initializationError: Ref<string | null>;
   initialize: () => Promise<void>;
   createConversation: (databaseId?: string) => Promise<void>;
   selectConversation: (conversationId: string) => Promise<void>;
@@ -58,6 +59,7 @@ export function createAgentConversationStore(): AgentConversationStore {
   const activeDetail = ref<ConversationDetail | null>(null);
   const draft = ref("");
   const isBusy = ref(false);
+  const initializationError = ref<string | null>(null);
   const activeConversation = computed<AgentConversation>(() =>
     activeDetail.value
       ? mapConversation(activeDetail.value, draft.value)
@@ -75,23 +77,35 @@ export function createAgentConversationStore(): AgentConversationStore {
     draft.value = "";
   }
 
+  async function createConversationInternal(databaseId = DEFAULT_DATABASE_ID) {
+    const created = await createConversationRequest(databaseId);
+    await refreshList();
+    await loadConversation(created.id);
+  }
+
   async function initialize() {
     if (isBusy.value) return;
     isBusy.value = true;
+    initializationError.value = null;
     try {
       await refreshList();
       if (conversations.value.length) await loadConversation(conversations.value[0].id);
-      else await createConversation(DEFAULT_DATABASE_ID);
+      else await createConversationInternal(DEFAULT_DATABASE_ID);
+    } catch (error) {
+      initializationError.value = error instanceof Error ? error.message : "无法加载会话，请重试。";
     } finally {
       isBusy.value = false;
     }
   }
 
   async function createConversation(databaseId = DEFAULT_DATABASE_ID) {
-    if (isBusy.value && activeConversationId.value) return;
-    const created = await createConversationRequest(databaseId);
-    await refreshList();
-    await loadConversation(created.id);
+    if (isBusy.value) return;
+    isBusy.value = true;
+    try {
+      await createConversationInternal(databaseId);
+    } finally {
+      isBusy.value = false;
+    }
   }
 
   async function selectConversation(conversationId: string) {
@@ -113,7 +127,7 @@ export function createAgentConversationStore(): AgentConversationStore {
       if (!conversations.value.length) {
         activeConversationId.value = "";
         activeDetail.value = null;
-        await createConversation(DEFAULT_DATABASE_ID);
+        await createConversationInternal(DEFAULT_DATABASE_ID);
       }
       else if (activeConversationId.value === conversationId) await loadConversation(conversations.value[0].id);
     } finally {
@@ -131,36 +145,65 @@ export function createAgentConversationStore(): AgentConversationStore {
   }
 
   async function sendQuestion(question: string, onProgress: (event: QueryStreamEvent) => void, referenceIds: string[] = []) {
-    if (!activeConversationId.value || isBusy.value) return;
+    const conversationId = activeConversationId.value;
+    if (!conversationId || isBusy.value) return;
     isBusy.value = true;
     const existing = activeDetail.value;
-    const hasHistory = Boolean(existing?.messages.length);
-    if (existing && hasHistory) {
+    const timestamp = new Date().toISOString();
+    if (existing) {
       existing.messages.push(
-        { id: `local-user-${Date.now()}`, turn_id: "", role: "user", content: question, status: "succeeded", progress: [], created_at: new Date().toISOString() },
-        { id: `local-assistant-${Date.now()}`, turn_id: "", role: "assistant", content: "正在准备查询", status: "running", progress: [], created_at: new Date().toISOString() },
+        { id: `local-user-${Date.now()}`, turn_id: "", role: "user", content: question, status: "succeeded", progress: [], created_at: timestamp },
+        { id: `local-assistant-${Date.now()}`, turn_id: "", role: "assistant", content: "正在准备查询", status: "running", progress: [], created_at: timestamp },
       );
     }
     draft.value = "";
+    let response: QueryResponse | null = null;
     try {
-      await streamConversationQuery(activeConversationId.value, { question, reference_ids: referenceIds }, (event) => {
-        if (hasHistory) {
-          const assistant = activeDetail.value?.messages.at(-1);
-          if (assistant?.role === "assistant") {
-            if (event.message) assistant.content = event.message;
-            if (event.node) assistant.progress.push(event);
-          }
+      response = await streamConversationQuery(conversationId, { question, reference_ids: referenceIds }, (event) => {
+        const assistant = activeDetail.value?.messages.at(-1);
+        if (assistant?.role === "assistant") {
+          if (event.message) assistant.content = event.message;
+          if (event.node) assistant.progress.push(event);
         }
         onProgress(event);
       });
+      const assistant = activeDetail.value?.messages.at(-1);
+      if (assistant?.role === "assistant") {
+        assistant.content = response.final_answer;
+        assistant.status = response.status;
+        assistant.response = response;
+      }
       await refreshList();
-      await loadConversation(activeConversationId.value);
+      await loadConversation(conversationId);
+    } catch (error) {
+      if (!response) {
+        const assistant = activeDetail.value?.messages.at(-1);
+        if (assistant?.role === "assistant") {
+          assistant.status = "failed";
+          assistant.content = error instanceof Error ? error.message : "查询未完成。";
+        }
+      }
+      throw error;
     } finally {
       isBusy.value = false;
     }
   }
 
-  return { conversations, activeConversationId, activeConversation, recentConversations, isBusy, initialize, createConversation, selectConversation, deleteConversation, setDraft, setDatabaseId, sendQuestion };
+  return {
+    conversations,
+    activeConversationId,
+    activeConversation,
+    recentConversations,
+    isBusy,
+    initializationError,
+    initialize,
+    createConversation,
+    selectConversation,
+    deleteConversation,
+    setDraft,
+    setDatabaseId,
+    sendQuestion,
+  };
 }
 
 export function provideAgentConversationStore() {

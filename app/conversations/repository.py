@@ -99,6 +99,33 @@ class ConversationRepository:
                 """
             )
             connection.execute("INSERT OR REPLACE INTO conversation_meta(key, value) VALUES ('schema_version', '1')")
+            self._recover_running_turns(connection)
+
+    def _recover_running_turns(self, connection: sqlite3.Connection) -> None:
+        """Close turns left running when the process or client disappeared."""
+
+        now = _now()
+        stale_message = "上一次查询因服务中断未完成，请重试。"
+        turn_rows = connection.execute(
+            "SELECT id, conversation_id FROM conversation_turns WHERE status = 'running'"
+        ).fetchall()
+        if not turn_rows:
+            return
+        turn_ids = [row["id"] for row in turn_rows]
+        placeholders = ",".join("?" for _ in turn_ids)
+        connection.execute(
+            f"UPDATE conversation_turns SET status = 'failed', completed_at = ? WHERE id IN ({placeholders})",
+            (now, *turn_ids),
+        )
+        connection.execute(
+            f"UPDATE conversation_messages SET status = 'failed', content = ?, response_json = NULL "
+            f"WHERE role = 'assistant' AND turn_id IN ({placeholders})",
+            (stale_message, *turn_ids),
+        )
+        connection.executemany(
+            "UPDATE conversations SET updated_at = ? WHERE id = ?",
+            [(now, row["conversation_id"]) for row in turn_rows],
+        )
 
     def create_conversation(self, user_id: str, database_id: str) -> dict[str, Any]:
         now = _now()
@@ -180,7 +207,12 @@ class ConversationRepository:
                 [(user_message_id, turn_id, "user", question, "completed", now), (assistant_message_id, turn_id, "assistant", "正在准备查询", "running", now)],
             )
             connection.execute("UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?", (title, now, conversation_id))
-        return {"turn_id": turn_id, "assistant_message_id": assistant_message_id, "database_id": conversation["database_id"]}
+        return {
+            "conversation_id": conversation_id,
+            "turn_id": turn_id,
+            "assistant_message_id": assistant_message_id,
+            "database_id": conversation["database_id"],
+        }
 
     def append_progress(self, assistant_message_id: str, progress: Mapping[str, Any]) -> None:
         with self._connection() as connection:

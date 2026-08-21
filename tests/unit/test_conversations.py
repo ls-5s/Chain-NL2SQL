@@ -66,3 +66,19 @@ def test_context_uses_fts_and_turn_creation_is_concurrent_safe(tmp_path) -> None
     with ThreadPoolExecutor(max_workers=4) as executor:
         turn_ids = list(executor.map(start, range(4)))
     assert len(set(turn_ids)) == 4
+
+
+def test_repository_recovers_running_turns_on_initialization(tmp_path) -> None:
+    path = tmp_path / "conversations.sqlite3"
+    repository = ConversationRepository(path)
+    conversation = repository.create_conversation("single-user", "demo")
+    turn = repository.start_turn("single-user", conversation["id"], "查询用户", "")
+
+    recovered = ConversationRepository(path)
+    detail = recovered.get_conversation("single-user", conversation["id"])
+
+    assert detail["messages"][-1]["status"] == "failed"
+    assert detail["messages"][-1]["content"] == "上一次查询因服务中断未完成，请重试。"
+    with recovered._connection() as connection:
+        status = connection.execute("SELECT status FROM conversation_turns WHERE id = ?", (turn["turn_id"],)).fetchone()[0]
+    assert status == "failed"

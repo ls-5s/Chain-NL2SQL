@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from app.config.settings import Settings
 
 
@@ -38,3 +40,9 @@ def validate_settings(settings: Settings) -> None:
         raise ValueError("APP_SESSION_SECRET must be changed outside local mode.")
     if settings.app_env != "local" and settings.auth_password == "123456":
         raise ValueError("APP_AUTH_PASSWORD must be changed outside local mode.")
+    if bool(settings.openai_api_key) != bool(settings.openai_model):
+        raise ValueError("OPENAI_API_KEY and OPENAI_MODEL must be configured together.")
+    if settings.openai_base_url:
+        parsed = urlparse(settings.openai_base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("OPENAI_BASE_URL must be a valid HTTP or HTTPS URL.")
