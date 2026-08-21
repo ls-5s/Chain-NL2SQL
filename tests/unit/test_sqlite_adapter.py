@@ -97,6 +97,17 @@ def test_binds_parameters_without_string_interpolation(
     assert result.rows == [["Bob"]]
 
 
+def test_binds_server_authorized_named_parameters(demo_db: Path, policy: AccessPolicy) -> None:
+    adapter = SQLiteAdapter("demo", str(demo_db))
+    result = adapter.execute_readonly(
+        "SELECT name FROM users WHERE id = :selected_users_id",
+        time.monotonic() + 5,
+        policy,
+        parameters={"selected_users_id": 2},
+    )
+    assert result.rows == [["Bob"]]
+
+
 def test_deadline_is_enforced(demo_db: Path, policy: AccessPolicy) -> None:
     # 过期请求必须在创建连接前被拒绝。
     adapter = SQLiteAdapter("demo", str(demo_db))

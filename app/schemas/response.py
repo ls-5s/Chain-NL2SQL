@@ -35,3 +35,37 @@ class DatabaseListResponse(BaseModel):
     """服务端允许暴露给当前环境的数据库标识列表。"""
 
     database_ids: list[str]
+
+
+class SessionResponse(BaseModel):
+    authenticated: bool
+    username: str | None = None
+
+
+class ConversationSummary(BaseModel):
+    id: str
+    title: str
+    database_id: str
+    created_at: str
+    updated_at: str
+    message_count: int = 0
+
+
+class ConversationMessage(BaseModel):
+    id: str
+    turn_id: str
+    role: str
+    content: str
+    status: str
+    response: QueryResponse | None = None
+    progress: list[dict[str, object]] = Field(default_factory=list)
+    created_at: str
+
+
+class ConversationDetail(ConversationSummary):
+    messages: list[ConversationMessage] = Field(default_factory=list)
+
+
+class ResultReferenceResponse(BaseModel):
+    id: str
+    label: str

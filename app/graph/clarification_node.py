@@ -13,7 +13,7 @@ def make_clarification_node(llm_client: LLMClient, timeout_seconds: float):
 
     def clarify(state: NL2SQLState) -> dict[str, object]:
         response = llm_client.generate(
-            prompt_template.invoke({"question": state["question"]}),
+            prompt_template.invoke({"question": state["question"], "conversation_context": state.get("conversation_context", "")}),
             timeout_seconds=timeout_seconds,
         )
         return {"status": QueryStatus.SUCCEEDED, "final_answer": response.content.strip()}

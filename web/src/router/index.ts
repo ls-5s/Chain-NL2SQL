@@ -31,8 +31,8 @@ export const router = createRouter({
   ],
 });
 
-router.beforeEach((to) => {
-  const authenticated = isAuthenticated();
+router.beforeEach(async (to) => {
+  const authenticated = await isAuthenticated();
   if (to.name === "login") {
     if (!authenticated) return true;
     const redirect = to.query.redirect;

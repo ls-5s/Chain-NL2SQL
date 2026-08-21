@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from app.api.authorization import AccessPolicy
 from app.db.base import DatabaseExecutionError
@@ -47,12 +47,13 @@ class SQLiteAdapter:
         sql: str,
         deadline: float,
         access_policy: AccessPolicy,
-        parameters: Sequence[Any] = (),
+        parameters: Sequence[Any] | Mapping[str, Any] = (),
     ) -> QueryResult:
         # 创建连接前先校验数据库身份和访问策略。
         self._check_database(self.database_id, access_policy)
         # 只有通过 AST 校验的 SQL 才能到达数据库驱动。
-        validation = validate_readonly_sql(sql, "sqlite", access_policy)
+        allowed_parameters = set(parameters) if isinstance(parameters, Mapping) else None
+        validation = validate_readonly_sql(sql, "sqlite", access_policy, allowed_parameters)
         if not validation.allowed:
             raise DatabaseExecutionError("unsafe_sql", validation.reason or "unsafe_sql")
         # 请求已过期时不再创建数据库连接。
@@ -69,7 +70,7 @@ class SQLiteAdapter:
             # 进度回调间隔用于平衡超时响应速度和回调开销。
             connection.set_progress_handler(progress_handler, 1_000)
             # 参数由 sqlite3 绑定，不通过字符串插值写入 SQL。
-            cursor = connection.execute(sql, tuple(parameters))
+            cursor = connection.execute(sql, parameters if isinstance(parameters, Mapping) else tuple(parameters))
             # 多读取一行哨兵数据，使 result_formatter 能判断是否截断。
             rows = cursor.fetchmany(self.result_row_limit + 1)
             return format_query_result(

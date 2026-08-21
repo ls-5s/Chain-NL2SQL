@@ -2,6 +2,23 @@
 
 基于 LangGraph 的链式自纠错 NL2SQL 项目，集成 Schema-RAG、SQL 安全治理和可复现实验评测。
 
+## 单账号会话部署
+
+分析会话、执行过程、结果快照、上下文记忆和受控行引用都保存在服务端
+`CONVERSATION_DATABASE_PATH` 指定的 SQLite 数据库中，浏览器不保存消息内容。唯一账号由
+`APP_AUTH_USERNAME` 和 `APP_AUTH_PASSWORD` 配置，登录后使用 HttpOnly、SameSite Cookie。
+
+跨设备访问时，前端和 `/api` 必须经同一 HTTPS 域名的反向代理提供；不要将开发服务器或
+未加密 Cookie 暴露到公网。生产环境必须设置随机的 `APP_SESSION_SECRET` 与非默认密码。
+
+SQLite 使用 WAL 模式。备份请在应用空闲时执行 SQLite 在线备份，例如：
+
+```powershell
+sqlite3 data/conversations.sqlite3 ".backup 'backups/conversations-YYYYMMDD.sqlite3'"
+```
+
+同时保存 `.sqlite3` 主文件；不要提交会话数据库、`-wal` 或 `-shm` 文件到版本库。
+
 > 项目状态：P0 的基础组件已部分实现，但端到端 NL2SQL 工作流尚未完成。下面的状态以当前仓库代码为准；“目标能力”不代表已上线功能。
 
 ## 当前实现状态

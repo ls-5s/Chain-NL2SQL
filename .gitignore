@@ -9,6 +9,7 @@ htmlcov/
 data/*.sqlite-journal
 data/*.sqlite-wal
 data/*.sqlite-shm
+data/conversations.sqlite3
 web/node_modules/
 web/dist/
 web/.env

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
-
+from app.api.auth import auth_router
 from app.api.routes import api_router, system_router
 from app.config.settings import get_settings
 from app.config.validation import validate_settings
@@ -15,6 +15,7 @@ def create_app() -> FastAPI:
     validate_settings(settings)
     app = FastAPI(title="Chain-NL2SQL", version="0.1.0")
     app.include_router(system_router)
+    app.include_router(auth_router)
     app.include_router(api_router)
     return app
 

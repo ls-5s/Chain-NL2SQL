@@ -23,8 +23,8 @@ function toggleProfileMenu() {
   profileMenuOpen.value = !profileMenuOpen.value;
 }
 
-function signOut() {
-  logout();
+async function signOut() {
+  await logout();
   void router.replace("/login");
 }
 

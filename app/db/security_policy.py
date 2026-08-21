@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 import sqlglot
 from sqlglot import exp
@@ -74,6 +75,7 @@ def validate_readonly_sql(
     sql: str,
     dialect: str,
     access_policy: AccessPolicy | None = None,
+    allowed_parameters: set[str] | None = None,
 ) -> SQLValidationResult:
     """允许一条只读查询，并执行可选的表和字段访问策略。"""
 
@@ -83,6 +85,11 @@ def validate_readonly_sql(
     if _has_comment_outside_quotes(sql):
         # 解析前拒绝注释，防止隐藏子句和策略绕过。
         return SQLValidationResult(False, "comments_not_allowed")
+    named_parameters = set(re.findall(r"(?<!:):([A-Za-z_][A-Za-z0-9_]*)", sql))
+    if named_parameters and allowed_parameters is None:
+        return SQLValidationResult(False, "parameters_not_allowed")
+    if allowed_parameters is not None and not named_parameters.issubset(allowed_parameters):
+        return SQLValidationResult(False, "unknown_parameter")
 
     try:
         # 按目标方言解析，而不是依赖关键字匹配。

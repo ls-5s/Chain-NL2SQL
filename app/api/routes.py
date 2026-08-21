@@ -3,14 +3,17 @@ from __future__ import annotations
 import json
 import threading
 from collections.abc import AsyncIterator
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
+from app.api.auth import require_authenticated
 from app.api.dependencies import RequestContext, get_request_context
 from app.api.response_mapper import map_query_state
 from app.config.settings import Settings, get_settings
+from app.conversations.repository import ConversationNotFoundError, ConversationRepository, InvalidResultReferenceError
 from app.db.sqlite_adapter import SQLiteAdapter
 from app.graph.builder import build_query_graph
 from app.graph.state import NL2SQLState, create_initial_state
@@ -18,8 +21,14 @@ from app.llm.factory import LLMConfigurationError, create_openai_client
 from app.rag.index_manager import SchemaIndexManager
 from app.rag.reranker import SentenceTransformerReranker
 from app.rag.vector_store import SentenceTransformerEmbedding
-from app.schemas.request import QueryRequest
-from app.schemas.response import DatabaseListResponse, HealthResponse
+from app.schemas.request import ConversationCreateRequest, ConversationQueryRequest, QueryRequest, ResultReferenceRequest
+from app.schemas.response import (
+    ConversationDetail,
+    ConversationSummary,
+    DatabaseListResponse,
+    HealthResponse,
+    ResultReferenceResponse,
+)
 
 api_router = APIRouter(prefix="/api/v1", tags=["nl2sql"])
 system_router = APIRouter(tags=["system"])
@@ -27,6 +36,7 @@ system_router = APIRouter(tags=["system"])
 _provider_lock = threading.Lock()
 _embedding_providers: dict[str, SentenceTransformerEmbedding] = {}
 _reranker_providers: dict[str, SentenceTransformerReranker] = {}
+_conversation_repositories: dict[str, ConversationRepository] = {}
 
 
 @system_router.get("/health", response_model=HealthResponse)
@@ -35,7 +45,7 @@ def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
 
 
 @api_router.get("/databases", response_model=DatabaseListResponse)
-def list_databases(settings: Settings = Depends(get_settings)) -> DatabaseListResponse:
+def list_databases(settings: Settings = Depends(get_settings), _: str = Depends(require_authenticated)) -> DatabaseListResponse:
     return DatabaseListResponse(database_ids=sorted(settings.allowed_database_ids))
 
 
@@ -115,10 +125,111 @@ async def query(
     )
 
 
-async def _stream_graph(graph: Any, state: NL2SQLState, database: SQLiteAdapter) -> AsyncIterator[str]:
+@api_router.get("/conversations", response_model=list[ConversationSummary])
+def list_conversations(context: RequestContext = Depends(get_request_context)) -> list[dict[str, Any]]:
+    return _conversation_repository(get_settings()).list_conversations(context.user_id)
+
+
+@api_router.post("/conversations", response_model=ConversationSummary)
+def create_conversation(
+    payload: ConversationCreateRequest, context: RequestContext = Depends(get_request_context)
+) -> dict[str, Any]:
+    if payload.database_id not in context.access_policy.allowed_database_ids:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Database is not allowed.")
+    return _conversation_repository(get_settings()).create_conversation(context.user_id, payload.database_id)
+
+
+@api_router.get("/conversations/{conversation_id}", response_model=ConversationDetail)
+def get_conversation(conversation_id: str, context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
+    try:
+        return _conversation_repository(get_settings()).get_conversation(context.user_id, conversation_id)
+    except ConversationNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation was not found.") from error
+
+
+@api_router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_conversation(conversation_id: str, context: RequestContext = Depends(get_request_context)) -> None:
+    try:
+        _conversation_repository(get_settings()).delete_conversation(context.user_id, conversation_id)
+    except ConversationNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation was not found.") from error
+
+
+@api_router.post("/conversations/{conversation_id}/references", response_model=ResultReferenceResponse)
+def create_result_reference(
+    conversation_id: str, payload: ResultReferenceRequest, context: RequestContext = Depends(get_request_context)
+) -> dict[str, str]:
+    try:
+        return _conversation_repository(get_settings()).create_result_reference(
+            context.user_id, conversation_id, payload.turn_id, payload.row_index
+        )
+    except ConversationNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation was not found.") from error
+    except InvalidResultReferenceError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
+
+
+@api_router.post("/conversations/{conversation_id}/query")
+async def conversation_query(
+    conversation_id: str,
+    payload: ConversationQueryRequest,
+    context: RequestContext = Depends(get_request_context),
+) -> StreamingResponse:
+    settings = get_settings()
+    repository = _conversation_repository(settings)
+    try:
+        conversation_context, bindings = repository.build_context(
+            context.user_id, conversation_id, payload.question, settings.conversation_context_max_chars, payload.reference_ids
+        )
+        turn = repository.start_turn(context.user_id, conversation_id, payload.question, conversation_context)
+    except ConversationNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation was not found.") from error
+    try:
+        graph, database = _create_graph_runtime(settings, context, turn["database_id"])
+    except LLMConfigurationError as error:
+        repository.finish_turn(turn["turn_id"], turn["assistant_message_id"], None, "LLM service is not configured.")
+        raise HTTPException(status_code=503, detail="LLM service is not configured.") from error
+    except ValueError as error:
+        repository.finish_turn(turn["turn_id"], turn["assistant_message_id"], None, str(error))
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    state = create_initial_state(
+        request_id=context.request_id,
+        question=payload.question,
+        database_id=turn["database_id"],
+        dialect="sqlite",
+        max_iterations=payload.max_iterations or settings.max_iterations,
+        conversation_context=conversation_context,
+        bound_parameters=bindings,
+    )
+    return StreamingResponse(
+        _stream_graph(
+            graph,
+            state,
+            database,
+            start_data={"conversation_id": conversation_id, "turn_id": turn["turn_id"], "message_id": turn["assistant_message_id"]},
+            on_progress=lambda item: repository.append_progress(turn["assistant_message_id"], item),
+            on_complete=lambda response: repository.finish_turn(turn["turn_id"], turn["assistant_message_id"], response),
+            on_error=lambda detail: repository.finish_turn(turn["turn_id"], turn["assistant_message_id"], None, detail),
+        ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
+async def _stream_graph(
+    graph: Any,
+    state: NL2SQLState,
+    database: SQLiteAdapter,
+    *,
+    start_data: dict[str, Any] | None = None,
+    on_progress: Callable[[dict[str, Any]], None] | None = None,
+    on_complete: Callable[[Any], None] | None = None,
+    on_error: Callable[[str], None] | None = None,
+) -> AsyncIterator[str]:
     current_state: dict[str, Any] = dict(state)
     try:
-        yield _sse("start", {"request_id": state["request_id"]})
+        yield _sse("start", {"request_id": state["request_id"], **(start_data or {})})
         async for update in graph.astream(state, stream_mode="updates"):
             for node, node_update in update.items():
                 current_state.update(node_update)
@@ -149,13 +260,21 @@ async def _stream_graph(graph: Any, state: NL2SQLState, database: SQLiteAdapter)
                     progress["validated"] = bool(current_state.get("validated_sql"))
                 if node == "execute_sql" and current_state.get("query_result"):
                     progress["row_count"] = current_state["query_result"].row_count
+                if on_progress:
+                    on_progress(progress)
                 yield _sse("progress", progress)
 
         response = map_query_state(current_state)
+        if on_complete:
+            on_complete(response)
         yield _sse("complete", response.model_dump(mode="json"))
     except LLMConfigurationError:
+        if on_error:
+            on_error("LLM service is not configured.")
         yield _sse("error", {"status_code": 503, "detail": "LLM service is not configured."})
     except Exception:
+        if on_error:
+            on_error("The NL2SQL agent could not complete the query.")
         yield _sse("error", {"status_code": 502, "detail": "The NL2SQL agent could not complete the query."})
     finally:
         database.close()
@@ -167,6 +286,78 @@ def _sse(event: str, data: dict[str, Any]) -> str:
 
 def _json_value(value: Any) -> Any:
     return value.value if hasattr(value, "value") else value
+
+
+def _conversation_repository(settings: Settings) -> ConversationRepository:
+    path = settings.conversation_database_path
+    with _provider_lock:
+        repository = _conversation_repositories.get(path)
+        if repository is None:
+            repository = ConversationRepository(
+                path,
+                embedding_factory=lambda: _embedding_provider(settings),
+                primary_key_resolver=lambda database_id, table: _primary_key_columns(settings, database_id, table),
+            )
+            _conversation_repositories[path] = repository
+        return repository
+
+
+def _embedding_provider(settings: Settings) -> SentenceTransformerEmbedding:
+    name = settings.schema_embedding_model
+    with _provider_lock:
+        provider = _embedding_providers.get(name)
+        if provider is None:
+            provider = SentenceTransformerEmbedding(name)
+            _embedding_providers[name] = provider
+        return provider
+
+
+def _primary_key_columns(settings: Settings, database_id: str, table: str) -> tuple[str, ...]:
+    if database_id != "demo":
+        return ()
+    adapter = SQLiteAdapter(database_id, settings.demo_database_path, settings.result_row_limit)
+    schema = adapter.inspect_schema(database_id)
+    document = next((item for item in schema.documents if item.table_name.lower() == table.lower()), None)
+    if document is None:
+        return ()
+    primary_key_line = next((line for line in document.content.splitlines() if line.startswith("PRIMARY KEY ")), "")
+    columns = primary_key_line.removeprefix("PRIMARY KEY ")
+    if not columns or columns == "none":
+        return ()
+    return tuple(column.strip() for column in columns.split(",") if column.strip())
+
+
+def _create_graph_runtime(settings: Settings, context: RequestContext, database_id: str) -> tuple[Any, SQLiteAdapter]:
+    if database_id not in context.access_policy.allowed_database_ids:
+        raise ValueError("Database is not allowed.")
+    if database_id != "demo":
+        raise ValueError("Database adapter is not configured.")
+    database = SQLiteAdapter(database_id, settings.demo_database_path, settings.result_row_limit)
+    llm_client = create_openai_client(settings)
+
+    def embedding_factory() -> SentenceTransformerEmbedding:
+        return _embedding_provider(settings)
+
+    def reranker_factory() -> SentenceTransformerReranker:
+        name = settings.schema_reranker_model
+        with _provider_lock:
+            provider = _reranker_providers.get(name)
+            if provider is None:
+                provider = SentenceTransformerReranker(name)
+                _reranker_providers[name] = provider
+            return provider
+
+    schema_retriever = SchemaIndexManager(
+        database.inspect_schema, root=settings.schema_index_root, mode=settings.schema_retrieval_mode,
+        top_k=settings.schema_top_k, fallback_mode=settings.schema_fallback_mode,
+        embedding_factory=embedding_factory, reranker_factory=reranker_factory,
+        embedding_model_name=settings.schema_embedding_model, reranker_model_name=settings.schema_reranker_model,
+    )
+    return build_query_graph(
+        database_executor=database, llm_client=llm_client, schema_retriever=schema_retriever,
+        access_policy=context.access_policy, query_timeout_seconds=settings.query_timeout_seconds,
+        intent_confidence_threshold=settings.intent_confidence_threshold,
+    ), database
 
 
 def _node_message(node: str) -> str:

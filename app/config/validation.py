@@ -26,3 +26,15 @@ def validate_settings(settings: Settings) -> None:
         raise ValueError("SCHEMA_FALLBACK_MODE must be none or bm25.")
     if not 1 <= settings.schema_top_k <= 50:
         raise ValueError("SCHEMA_TOP_K must be between 1 and 50.")
+    if settings.conversation_context_max_chars < 1000:
+        raise ValueError("CONVERSATION_CONTEXT_MAX_CHARS must be at least 1000.")
+    if settings.session_max_age_seconds <= 0:
+        raise ValueError("APP_SESSION_MAX_AGE_SECONDS must be positive.")
+    if not settings.auth_username or not settings.auth_password:
+        raise ValueError("APP_AUTH_USERNAME and APP_AUTH_PASSWORD must be configured.")
+    if not settings.session_secret:
+        raise ValueError("APP_SESSION_SECRET must be configured.")
+    if settings.app_env != "local" and settings.session_secret == "chain-nl2sql-local-session-change-me":
+        raise ValueError("APP_SESSION_SECRET must be changed outside local mode.")
+    if settings.app_env != "local" and settings.auth_password == "123456":
+        raise ValueError("APP_AUTH_PASSWORD must be changed outside local mode.")

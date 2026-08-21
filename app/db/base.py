@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol, Sequence
+from typing import Any, Mapping, Protocol, Sequence
 
 from app.api.authorization import AccessPolicy
 from app.schemas.domain import QueryResult, SchemaRetrieval
@@ -31,7 +31,7 @@ class DatabaseExecutor(Protocol):
         sql: str,
         deadline: float,
         access_policy: AccessPolicy,
-        parameters: Sequence[Any] = (),
+        parameters: Sequence[Any] | Mapping[str, Any] = (),
     ) -> QueryResult: ...
 
     def close(self) -> None: ...

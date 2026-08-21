@@ -18,6 +18,8 @@ class NL2SQLState(TypedDict):
     max_iterations: int
     trace: list[TraceEvent]
     status: QueryStatus
+    conversation_context: NotRequired[str]
+    bound_parameters: NotRequired[dict[str, object]]
     # 以下字段由对应节点按需追加，路由前必须检查其是否存在。
     schema_version: NotRequired[str]
     intent: NotRequired[QueryIntent]
@@ -45,6 +47,8 @@ def create_initial_state(
     database_id: str,
     dialect: str,
     max_iterations: int,
+    conversation_context: str = "",
+    bound_parameters: dict[str, object] | None = None,
 ) -> NL2SQLState:
     # iteration=0 表示首次 SQL 尝试；后续修复节点才会递增该计数。
     return {
@@ -56,4 +60,6 @@ def create_initial_state(
         "max_iterations": max_iterations,
         "trace": [],
         "status": QueryStatus.RUNNING,
+        "conversation_context": conversation_context,
+        "bound_parameters": bound_parameters or {},
     }

@@ -26,7 +26,7 @@ def make_intent_gate_node(llm_client: LLMClient, timeout_seconds: float, confide
                 "intent_classification_valid": True,
             }
         response = llm_client.generate(
-            prompt_template.invoke({"question": state["question"]}),
+            prompt_template.invoke({"question": state["question"], "conversation_context": state.get("conversation_context", "")}),
             timeout_seconds=timeout_seconds,
         )
         parsed = _parse_intent(response.content)

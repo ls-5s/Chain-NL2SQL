@@ -31,6 +31,12 @@ class Settings:
     schema_fallback_mode: str = "bm25"
     schema_embedding_model: str = "BAAI/bge-small-zh-v1.5"
     schema_reranker_model: str = "BAAI/bge-reranker-base"
+    conversation_database_path: str = "data/conversations.sqlite3"
+    conversation_context_max_chars: int = 6000
+    auth_username: str = "admin"
+    auth_password: str = "123456"
+    session_secret: str = "chain-nl2sql-local-session-change-me"
+    session_max_age_seconds: int = 60 * 60 * 24 * 14
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -55,6 +61,12 @@ class Settings:
             schema_fallback_mode=os.getenv("SCHEMA_FALLBACK_MODE", "bm25"),
             schema_embedding_model=os.getenv("SCHEMA_EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5"),
             schema_reranker_model=os.getenv("SCHEMA_RERANKER_MODEL", "BAAI/bge-reranker-base"),
+            conversation_database_path=os.getenv("CONVERSATION_DATABASE_PATH", "data/conversations.sqlite3"),
+            conversation_context_max_chars=int(os.getenv("CONVERSATION_CONTEXT_MAX_CHARS", "6000")),
+            auth_username=os.getenv("APP_AUTH_USERNAME", "admin"),
+            auth_password=os.getenv("APP_AUTH_PASSWORD", "123456"),
+            session_secret=os.getenv("APP_SESSION_SECRET", "chain-nl2sql-local-session-change-me"),
+            session_max_age_seconds=int(os.getenv("APP_SESSION_MAX_AGE_SECONDS", str(60 * 60 * 24 * 14))),
         )
 
 

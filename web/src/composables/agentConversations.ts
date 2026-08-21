@@ -1,20 +1,17 @@
 import { computed, inject, provide, ref, type ComputedRef, type InjectionKey, type Ref } from "vue";
 
-import type { QueryResponse, QueryStreamEvent } from "@/types/api";
+import {
+  createConversation as createConversationRequest,
+  deleteConversation as deleteConversationRequest,
+  fetchConversation,
+  fetchConversations,
+  streamConversationQuery,
+} from "@/api/client";
+import type { ConversationDetail, ConversationMessage, ConversationSummary, QueryStreamEvent } from "@/types/api";
 
-export const AGENT_CONVERSATIONS_STORAGE_KEY = "chain-nl2sql-agent-conversations-v1";
-
-const STORAGE_VERSION = 1;
 const DEFAULT_DATABASE_ID = "demo";
-const DEFAULT_TITLE = "新聊天";
 
-export interface AgentChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  response?: QueryResponse;
-  progress?: QueryStreamEvent[];
-}
+export interface AgentChatMessage extends ConversationMessage {}
 
 export interface AgentConversation {
   id: string;
@@ -22,230 +19,151 @@ export interface AgentConversation {
   messages: AgentChatMessage[];
   draft: string;
   databaseId: string;
-  createdAt: number;
-  updatedAt: number;
-}
-
-interface StoredConversations {
-  version: number;
-  activeConversationId: string;
-  conversations: AgentConversation[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface AgentConversationStore {
-  conversations: Ref<AgentConversation[]>;
+  conversations: Ref<ConversationSummary[]>;
   activeConversationId: Ref<string>;
   activeConversation: ComputedRef<AgentConversation>;
-  recentConversations: ComputedRef<AgentConversation[]>;
+  recentConversations: ComputedRef<ConversationSummary[]>;
   isBusy: Ref<boolean>;
-  createConversation: () => void;
-  selectConversation: (conversationId: string) => void;
-  deleteConversation: (conversationId: string) => void;
+  initialize: () => Promise<void>;
+  createConversation: (databaseId?: string) => Promise<void>;
+  selectConversation: (conversationId: string) => Promise<void>;
+  deleteConversation: (conversationId: string) => Promise<void>;
   setDraft: (draft: string) => void;
   setDatabaseId: (databaseId: string) => void;
-  appendMessage: (message: AgentChatMessage) => void;
-  updateMessage: (messageId: string, update: (message: AgentChatMessage) => void) => void;
-  setBusy: (busy: boolean) => void;
+  sendQuestion: (question: string, onProgress: (event: QueryStreamEvent) => void, referenceIds?: string[]) => Promise<void>;
 }
 
-export const agentConversationStoreKey: InjectionKey<AgentConversationStore> =
-  Symbol("agentConversationStore");
+export const agentConversationStoreKey: InjectionKey<AgentConversationStore> = Symbol("agentConversationStore");
 
-function createId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
-  return `conversation-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-function createConversation(): AgentConversation {
-  const now = Date.now();
+function mapConversation(detail: ConversationDetail, draft = ""): AgentConversation {
   return {
-    id: createId(),
-    title: DEFAULT_TITLE,
-    messages: [],
-    draft: "",
-    databaseId: DEFAULT_DATABASE_ID,
-    createdAt: now,
-    updatedAt: now,
+    id: detail.id,
+    title: detail.title,
+    messages: detail.messages,
+    draft,
+    databaseId: detail.database_id,
+    createdAt: detail.created_at,
+    updatedAt: detail.updated_at,
   };
-}
-
-function isChatMessage(value: unknown): value is AgentChatMessage {
-  if (!value || typeof value !== "object") return false;
-  const message = value as Partial<AgentChatMessage>;
-  return (
-    typeof message.id === "string" &&
-    (message.role === "user" || message.role === "assistant") &&
-    typeof message.content === "string" &&
-    (message.progress === undefined || Array.isArray(message.progress))
-  );
-}
-
-function isConversation(value: unknown): value is AgentConversation {
-  if (!value || typeof value !== "object") return false;
-  const conversation = value as Partial<AgentConversation>;
-  return (
-    typeof conversation.id === "string" &&
-    typeof conversation.title === "string" &&
-    Array.isArray(conversation.messages) &&
-    conversation.messages.every(isChatMessage) &&
-    typeof conversation.draft === "string" &&
-    typeof conversation.databaseId === "string" &&
-    typeof conversation.createdAt === "number" &&
-    typeof conversation.updatedAt === "number"
-  );
-}
-
-function readStoredConversations(): StoredConversations | null {
-  if (typeof window === "undefined") return null;
-
-  try {
-    const raw = window.localStorage.getItem(AGENT_CONVERSATIONS_STORAGE_KEY);
-    if (!raw) return null;
-    const stored = JSON.parse(raw) as Partial<StoredConversations>;
-    if (
-      stored.version !== STORAGE_VERSION ||
-      typeof stored.activeConversationId !== "string" ||
-      !Array.isArray(stored.conversations) ||
-      !stored.conversations.every(isConversation)
-    ) {
-      return null;
-    }
-    return stored as StoredConversations;
-  } catch {
-    return null;
-  }
-}
-
-function titleForQuestion(question: string) {
-  return question.trim().slice(0, 24) || DEFAULT_TITLE;
 }
 
 export function createAgentConversationStore(): AgentConversationStore {
-  const stored = readStoredConversations();
-  const initialConversations = stored?.conversations.length ? stored.conversations : [createConversation()];
-  const conversations = ref(initialConversations);
-  const activeConversationId = ref(
-    stored && initialConversations.some((conversation) => conversation.id === stored.activeConversationId)
-      ? stored.activeConversationId
-      : initialConversations[0].id,
-  );
+  const conversations = ref<ConversationSummary[]>([]);
+  const activeConversationId = ref("");
+  const activeDetail = ref<ConversationDetail | null>(null);
+  const draft = ref("");
   const isBusy = ref(false);
-
-  const activeConversation = computed(() => {
-    const conversation = conversations.value.find(
-      (item) => item.id === activeConversationId.value,
-    );
-    if (conversation) return conversation;
-
-    const fallback = createConversation();
-    conversations.value.push(fallback);
-    activeConversationId.value = fallback.id;
-    return fallback;
-  });
-  const recentConversations = computed(() =>
-    [...conversations.value].sort((left, right) => right.updatedAt - left.updatedAt),
+  const activeConversation = computed<AgentConversation>(() =>
+    activeDetail.value
+      ? mapConversation(activeDetail.value, draft.value)
+      : { id: "", title: "新聊天", messages: [], draft: draft.value, databaseId: DEFAULT_DATABASE_ID, createdAt: "", updatedAt: "" },
   );
+  const recentConversations = computed(() => conversations.value);
 
-  function persist() {
-    if (typeof window === "undefined") return;
-    const payload: StoredConversations = {
-      version: STORAGE_VERSION,
-      activeConversationId: activeConversationId.value,
-      conversations: conversations.value,
-    };
-    window.localStorage.setItem(AGENT_CONVERSATIONS_STORAGE_KEY, JSON.stringify(payload));
+  async function refreshList() {
+    conversations.value = await fetchConversations();
   }
 
-  function touch(conversation: AgentConversation) {
-    conversation.updatedAt = Date.now();
-    persist();
-  }
-
-  function createNewConversation() {
-    const current = activeConversation.value;
-    if (!current.messages.length && !current.draft.trim()) return;
-
-    const conversation = createConversation();
-    conversations.value.push(conversation);
-    activeConversationId.value = conversation.id;
-    persist();
-  }
-
-  function selectConversation(conversationId: string) {
-    if (isBusy.value || !conversations.value.some((conversation) => conversation.id === conversationId))
-      return;
+  async function loadConversation(conversationId: string) {
+    activeDetail.value = await fetchConversation(conversationId);
     activeConversationId.value = conversationId;
-    persist();
+    draft.value = "";
   }
 
-  function deleteConversation(conversationId: string) {
+  async function initialize() {
     if (isBusy.value) return;
-    const index = conversations.value.findIndex((conversation) => conversation.id === conversationId);
-    if (index === -1) return;
-
-    const wasActive = activeConversationId.value === conversationId;
-    conversations.value.splice(index, 1);
-    if (!conversations.value.length) {
-      const conversation = createConversation();
-      conversations.value.push(conversation);
-      activeConversationId.value = conversation.id;
-    } else if (wasActive) {
-      activeConversationId.value = recentConversations.value[0].id;
+    isBusy.value = true;
+    try {
+      await refreshList();
+      if (conversations.value.length) await loadConversation(conversations.value[0].id);
+      else await createConversation(DEFAULT_DATABASE_ID);
+    } finally {
+      isBusy.value = false;
     }
-    persist();
   }
 
-  function setDraft(draft: string) {
-    activeConversation.value.draft = draft;
-    touch(activeConversation.value);
+  async function createConversation(databaseId = DEFAULT_DATABASE_ID) {
+    if (isBusy.value && activeConversationId.value) return;
+    const created = await createConversationRequest(databaseId);
+    await refreshList();
+    await loadConversation(created.id);
+  }
+
+  async function selectConversation(conversationId: string) {
+    if (isBusy.value || conversationId === activeConversationId.value) return;
+    isBusy.value = true;
+    try {
+      await loadConversation(conversationId);
+    } finally {
+      isBusy.value = false;
+    }
+  }
+
+  async function deleteConversation(conversationId: string) {
+    if (isBusy.value) return;
+    isBusy.value = true;
+    try {
+      await deleteConversationRequest(conversationId);
+      await refreshList();
+      if (!conversations.value.length) {
+        activeConversationId.value = "";
+        activeDetail.value = null;
+        await createConversation(DEFAULT_DATABASE_ID);
+      }
+      else if (activeConversationId.value === conversationId) await loadConversation(conversations.value[0].id);
+    } finally {
+      isBusy.value = false;
+    }
+  }
+
+  function setDraft(value: string) {
+    draft.value = value;
   }
 
   function setDatabaseId(databaseId: string) {
-    activeConversation.value.databaseId = databaseId;
-    touch(activeConversation.value);
+    if (activeDetail.value?.messages.length) return;
+    if (activeDetail.value) activeDetail.value.database_id = databaseId;
   }
 
-  function appendMessage(message: AgentChatMessage) {
-    const conversation = activeConversation.value;
-    conversation.messages.push(message);
-    if (message.role === "user" && conversation.title === DEFAULT_TITLE && conversation.messages.length === 1) {
-      conversation.title = titleForQuestion(message.content);
+  async function sendQuestion(question: string, onProgress: (event: QueryStreamEvent) => void, referenceIds: string[] = []) {
+    if (!activeConversationId.value || isBusy.value) return;
+    isBusy.value = true;
+    const existing = activeDetail.value;
+    if (existing) {
+      existing.messages.push(
+        { id: `local-user-${Date.now()}`, turn_id: "", role: "user", content: question, status: "succeeded", progress: [], created_at: new Date().toISOString() },
+        { id: `local-assistant-${Date.now()}`, turn_id: "", role: "assistant", content: "正在准备查询", status: "running", progress: [], created_at: new Date().toISOString() },
+      );
     }
-    touch(conversation);
+    draft.value = "";
+    try {
+      await streamConversationQuery(activeConversationId.value, { question, reference_ids: referenceIds }, (event) => {
+        const assistant = activeDetail.value?.messages.at(-1);
+        if (assistant?.role === "assistant") {
+          if (event.message) assistant.content = event.message;
+          if (event.node) assistant.progress.push(event);
+        }
+        onProgress(event);
+      });
+      await refreshList();
+      await loadConversation(activeConversationId.value);
+    } finally {
+      isBusy.value = false;
+    }
   }
 
-  function updateMessage(messageId: string, update: (message: AgentChatMessage) => void) {
-    const conversation = activeConversation.value;
-    const message = conversation.messages.find((item) => item.id === messageId);
-    if (!message) return;
-    update(message);
-    touch(conversation);
-  }
-
-  persist();
-
-  return {
-    conversations,
-    activeConversationId,
-    activeConversation,
-    recentConversations,
-    isBusy,
-    createConversation: createNewConversation,
-    selectConversation,
-    deleteConversation,
-    setDraft,
-    setDatabaseId,
-    appendMessage,
-    updateMessage,
-    setBusy: (busy) => {
-      isBusy.value = busy;
-    },
-  };
+  return { conversations, activeConversationId, activeConversation, recentConversations, isBusy, initialize, createConversation, selectConversation, deleteConversation, setDraft, setDatabaseId, sendQuestion };
 }
 
 export function provideAgentConversationStore() {
   const store = createAgentConversationStore();
   provide(agentConversationStoreKey, store);
+  void store.initialize();
   return store;
 }
 

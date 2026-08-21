@@ -41,7 +41,7 @@ function redirectAfterLogin(): void {
   void router.replace(safeRedirect());
 }
 
-function submit(): void {
+async function submit(): Promise<void> {
   if (submitting.value) return;
   errorMessage.value = "";
   if (!username.value.trim() || !password.value) {
@@ -50,7 +50,7 @@ function submit(): void {
   }
 
   submitting.value = true;
-  if (!login({ username: username.value, password: password.value })) {
+  if (!(await login({ username: username.value, password: password.value }))) {
     errorMessage.value = "用户名或密码不正确。";
     submitting.value = false;
     return;
@@ -59,7 +59,9 @@ function submit(): void {
   redirectAfterLogin();
 }
 
-if (isAuthenticated()) redirectAfterLogin();
+void isAuthenticated().then((authenticated) => {
+  if (authenticated) redirectAfterLogin();
+});
 </script>
 
 <template>

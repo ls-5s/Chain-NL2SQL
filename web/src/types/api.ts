@@ -22,6 +22,16 @@ export interface QueryRequest {
   max_iterations?: number;
 }
 
+export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface SessionResponse {
+  authenticated: boolean;
+  username?: string | null;
+}
+
 export interface QueryResult {
   columns: string[];
   rows: unknown[][];
@@ -93,6 +103,35 @@ export interface QueryStreamEvent {
 
 export interface DatabaseListResponse {
   database_ids: string[];
+}
+
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  database_id: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+}
+
+export interface ConversationMessage {
+  id: string;
+  turn_id: string;
+  role: "user" | "assistant";
+  content: string;
+  status: QueryStatus;
+  response?: QueryResponse | null;
+  progress: QueryStreamEvent[];
+  created_at: string;
+}
+
+export interface ConversationDetail extends ConversationSummary {
+  messages: ConversationMessage[];
+}
+
+export interface ResultReferenceResponse {
+  id: string;
+  label: string;
 }
 
 export type ApprovalStatus = "pending" | "approved" | "rejected";

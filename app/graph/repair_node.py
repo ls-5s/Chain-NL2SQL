@@ -35,6 +35,7 @@ def make_repair_node(llm_client: LLMClient, timeout_seconds: float):
                     "dialect": state["dialect"],
                     "schema_context": schema_context,
                     "question": state["question"],
+                    "conversation_context": state.get("conversation_context", ""),
                     "failed_sql": state.get("generated_sql", ""),
                     "error_message": state.get("safe_error", ""),
                 }

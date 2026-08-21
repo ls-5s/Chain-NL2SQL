@@ -15,9 +15,14 @@ def test_health_reports_environment() -> None:
 def test_query_reports_missing_llm_configuration(monkeypatch) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    monkeypatch.setenv("APP_AUTH_USERNAME", "admin")
+    monkeypatch.setenv("APP_AUTH_PASSWORD", "123456")
     get_settings.cache_clear()
 
-    response = TestClient(create_app()).post(
+    client = TestClient(create_app())
+    login = client.post("/api/v1/auth/login", json={"username": "admin", "password": "123456"})
+    assert login.status_code == 200
+    response = client.post(
         "/api/v1/query",
         json={"question": "查询用户数量", "database_id": "demo"},
     )

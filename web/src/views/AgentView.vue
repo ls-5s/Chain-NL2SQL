@@ -1,18 +1,19 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import {
   AudioLines,
+  CornerDownRight,
+  ChevronDown,
   Database,
   LoaderCircle,
   Mic,
   Plus,
   Sparkles,
-  UserRound,
 } from "lucide-vue-next";
 
-import { fetchDatabases, streamQuery } from "@/api/client";
-import { useAgentConversationStore, type AgentChatMessage } from "@/composables/agentConversations";
+import { createResultReference, fetchDatabases } from "@/api/client";
+import { useAgentConversationStore } from "@/composables/agentConversations";
 import type {
   QueryIntent,
   QueryResponse,
@@ -20,42 +21,21 @@ import type {
   QueryStatus,
 } from "@/types/api";
 
-const question = ref("");
-const databaseId = ref("demo");
 const databases = ref<string[]>([]);
-const loading = ref(false);
 const conversation = ref<HTMLElement | null>(null);
 const agentStep = ref("正在准备查询");
+const referenceIds = ref<string[]>([]);
 const store = useAgentConversationStore();
 const messages = computed(() => store.activeConversation.value.messages);
-
-watch(
-  () => store.activeConversationId.value,
-  () => {
-    question.value = store.activeConversation.value.draft;
-    databaseId.value = store.activeConversation.value.databaseId;
-    loading.value = false;
-    void scrollToBottom();
-  },
-  { immediate: true },
-);
-
-watch(question, (value) => {
-  if (!loading.value && value !== store.activeConversation.value.draft) store.setDraft(value);
-});
-
-watch(databaseId, (value) => {
-  if (value !== store.activeConversation.value.databaseId) store.setDatabaseId(value);
-});
-
-const canSubmit = computed(() => question.value.trim().length > 0 && !loading.value);
+const question = computed({ get: () => store.activeConversation.value.draft, set: (value: string) => store.setDraft(value) });
+const databaseId = computed({ get: () => store.activeConversation.value.databaseId, set: (value: string) => store.setDatabaseId(value) });
+const loading = computed(() => store.isBusy.value);
+const canSubmit = computed(() => question.value.trim().length > 0 && !loading.value && Boolean(store.activeConversationId.value));
 
 onMounted(async () => {
   try {
     databases.value = await fetchDatabases();
-    if (databases.value.length && !databases.value.includes(databaseId.value)) {
-      databaseId.value = databases.value[0];
-    }
+    if (databases.value.length && !databases.value.includes(databaseId.value)) databaseId.value = databases.value[0];
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "无法加载数据库列表");
   }
@@ -65,52 +45,23 @@ async function askQuestion(value = question.value) {
   const text = value.trim();
   if (!text || loading.value) return;
 
-  question.value = "";
-  const userMessage: AgentChatMessage = { id: crypto.randomUUID(), role: "user", content: text };
-  store.appendMessage(userMessage);
-  const assistantMessage: AgentChatMessage = {
-    id: crypto.randomUUID(),
-    role: "assistant",
-    content: "正在准备查询",
-    progress: [],
-  };
-  store.appendMessage(assistantMessage);
-  loading.value = true;
-  store.setBusy(true);
-  store.setDraft("");
   agentStep.value = "正在连接查询 Agent";
   await scrollToBottom();
 
   try {
-    const response = await streamQuery(
-      { question: text, database_id: databaseId.value },
+    await store.sendQuestion(
+      text,
       (event) => {
         if (event.message) {
           agentStep.value = event.message;
-          store.updateMessage(assistantMessage.id, (message) => {
-            message.content = event.message || message.content;
-            message.progress = message.progress || [];
-          });
-        }
-        if (event.node) {
-          store.updateMessage(assistantMessage.id, (message) => {
-            message.progress = message.progress || [];
-            message.progress.push(event);
-          });
         }
       },
+      referenceIds.value,
     );
-    store.updateMessage(assistantMessage.id, (message) => {
-      message.content = response.final_answer;
-      message.response = response;
-    });
+    referenceIds.value = [];
   } catch (error) {
-    store.updateMessage(assistantMessage.id, (message) => {
-      message.content = error instanceof Error ? error.message : "查询服务暂时不可用，请稍后重试。";
-    });
+    ElMessage.error(error instanceof Error ? error.message : "查询服务暂时不可用，请稍后重试。");
   } finally {
-    loading.value = false;
-    store.setBusy(false);
     agentStep.value = "正在准备查询";
     await scrollToBottom();
   }
@@ -149,9 +100,20 @@ function resultColumns(result: QueryResult) {
 function resultRows(response: QueryResponse) {
   const result = response.result;
   if (!result) return [];
-  return result.rows.map((row) =>
-    Object.fromEntries(result.columns.map((column, index) => [column, row[index]])),
+  return result.rows.map((row, rowIndex) =>
+    Object.assign({ __rowIndex: rowIndex }, Object.fromEntries(result.columns.map((column, index) => [column, row[index]]))),
   );
+}
+
+async function referenceRow(message: { turn_id: string }, rowIndex: number) {
+  if (!store.activeConversationId.value || !message.turn_id) return;
+  try {
+    const reference = await createResultReference(store.activeConversationId.value, message.turn_id, rowIndex);
+    referenceIds.value = [reference.id];
+    ElMessage.success(`${reference.label} 已加入下一次查询`);
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "该行暂时不能引用。");
+  }
 }
 
 async function scrollToBottom() {
@@ -206,16 +168,15 @@ async function scrollToBottom() {
           class="message-row"
           :class="`message-row--${message.role}`"
         >
-          <div class="message-avatar">
-            <UserRound v-if="message.role === 'user'" :size="17" />
-            <Sparkles v-else :size="17" />
-          </div>
           <div class="message-bubble">
             <div class="message-meta">{{ message.role === "user" ? "你" : "Chain Agent" }}</div>
             <p v-if="message.role === 'user'">{{ message.content }}</p>
 
-            <div v-if="message.progress?.length" class="reasoning-timeline">
-              <div class="reasoning-timeline__title">执行过程</div>
+            <details v-if="message.progress?.length" class="reasoning-timeline" open>
+              <summary class="reasoning-timeline__title">
+                <span>执行过程</span>
+                <ChevronDown class="reasoning-timeline__chevron" :size="17" aria-hidden="true" />
+              </summary>
               <div
                 v-for="step in message.progress"
                 :key="`${step.node}-${step.iteration}`"
@@ -228,7 +189,7 @@ async function scrollToBottom() {
                   <code v-if="step.sql">{{ step.sql }}</code>
                 </div>
               </div>
-            </div>
+            </details>
 
             <p v-if="message.role === 'assistant'" class="message-answer">{{ message.content }}</p>
             <span
@@ -259,6 +220,19 @@ async function scrollToBottom() {
                   v-bind="column"
                   min-width="130"
                 />
+                <el-table-column label="引用" width="58" fixed="right">
+                  <template #default="scope">
+                    <button
+                      class="row-reference-button"
+                      type="button"
+                      title="引用此行"
+                      aria-label="引用此行"
+                      @click="referenceRow(message, scope.row.__rowIndex)"
+                    >
+                      <CornerDownRight :size="15" aria-hidden="true" />
+                    </button>
+                  </template>
+                </el-table-column>
               </el-table>
               <div v-else class="result-empty">没有返回数据行</div>
               <div class="response-card__footer">
@@ -268,8 +242,8 @@ async function scrollToBottom() {
           </div>
         </article>
         <div v-if="loading" class="message-row message-row--assistant">
-          <div class="message-avatar"><LoaderCircle class="spin" :size="17" /></div>
           <div class="message-bubble message-bubble--loading">
+            <LoaderCircle class="spin" :size="17" aria-hidden="true" />
             {{ agentStep }}<span class="loading-dots">...</span>
           </div>
         </div>
@@ -299,7 +273,7 @@ async function scrollToBottom() {
             <label class="database-picker" title="选择数据源">
               <Database :size="16" />
               <span class="sr-only">选择数据源</span>
-              <select v-model="databaseId" :disabled="loading" aria-label="选择数据源">
+              <select v-model="databaseId" :disabled="loading || messages.length > 0" aria-label="选择数据源">
                 <option v-for="database in databases" :key="database" :value="database">
                   {{ database }}
                 </option>
@@ -498,37 +472,22 @@ async function scrollToBottom() {
 .message-list {
   display: flex;
   flex-direction: column;
-  gap: 25px;
+  gap: 30px;
   width: 100%;
-  padding: 22px 0 140px;
+  padding: 34px 8px 140px;
 }
 .message-row {
   display: flex;
-  gap: 12px;
   align-items: flex-start;
 }
 .message-row--user {
   flex-direction: row-reverse;
 }
-.message-avatar {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
-  place-items: center;
-  border-radius: 50%;
-  color: #fff;
-  background: #343434;
-}
-.message-row--assistant .message-avatar {
-  color: #fff;
-  background: #1f2933;
-}
 .message-bubble {
-  max-width: min(720px, calc(100% - 44px));
+  max-width: min(680px, 100%);
   color: #303030;
-  font-size: 14px;
-  line-height: 1.7;
+  font-size: 15px;
+  line-height: 1.72;
 }
 .message-row--user .message-bubble {
   text-align: right;
@@ -539,18 +498,22 @@ async function scrollToBottom() {
 .message-bubble > p {
   display: inline-block;
   margin: 0;
+  max-width: 100%;
   border-radius: 18px;
-  padding: 10px 14px;
-  background: #f1f1f1;
+  padding: 11px 18px;
+  background: #f2f2f2;
   text-align: left;
+  overflow-wrap: anywhere;
 }
 .message-row--assistant .message-bubble > p {
   border-radius: 4px;
   padding: 2px 0;
   background: transparent;
+  font-size: 16px;
+  line-height: 1.75;
 }
 .message-answer {
-  margin-top: 14px !important;
+  margin-top: 16px !important;
   color: #303030;
 }
 .message-row--user .message-bubble > p {
@@ -558,10 +521,10 @@ async function scrollToBottom() {
 }
 .intent-pill {
   display: inline-block;
-  margin-top: 8px;
+  margin-top: 11px;
   border-radius: 999px;
-  padding: 4px 8px;
-  font-size: 11px;
+  padding: 5px 10px;
+  font-size: 12px;
   font-weight: 700;
 }
 .intent-pill--general_chat {
@@ -573,6 +536,9 @@ async function scrollToBottom() {
   background: #fff2d9;
 }
 .message-bubble--loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   padding: 4px 0;
   color: #777;
 }
@@ -580,24 +546,53 @@ async function scrollToBottom() {
   color: #333;
 }
 .reasoning-timeline {
-  margin-top: 14px;
-  padding: 12px 13px;
-  border: 1px solid #e7e7e7;
-  border-radius: 8px;
-  background: #fafafa;
+  width: min(100%, 676px);
+  margin-top: 0;
+  padding: 18px 18px 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   text-align: left;
 }
 .reasoning-timeline__title {
-  margin-bottom: 11px;
-  color: #5e5e5e;
-  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  color: #777777;
+  font-size: 13px;
   font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+.reasoning-timeline__title::-webkit-details-marker {
+  display: none;
+}
+.reasoning-timeline__title:focus-visible {
+  outline: 2px solid #c8c8c8;
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.reasoning-timeline__chevron {
+  flex: 0 0 auto;
+  color: #a7a7a7;
+  transition: transform 0.18s ease;
+}
+.reasoning-timeline[open] .reasoning-timeline__chevron {
+  transform: rotate(180deg);
+}
+.reasoning-timeline:not([open]) {
+  padding-bottom: 18px;
+}
+.reasoning-timeline:not([open]) .reasoning-timeline__title {
+  margin-bottom: 0;
 }
 .reasoning-step {
   display: flex;
-  gap: 9px;
+  gap: 11px;
   position: relative;
-  padding-bottom: 12px;
+  padding-bottom: 14px;
 }
 .reasoning-step:last-child {
   padding-bottom: 0;
@@ -605,20 +600,20 @@ async function scrollToBottom() {
 .reasoning-step:not(:last-child)::before {
   content: "";
   position: absolute;
-  top: 10px;
+  top: 11px;
   bottom: 0;
-  left: 3px;
+  left: 4px;
   width: 1px;
-  background: #dddddd;
+  background: #e8e8e8;
 }
 .reasoning-step__dot {
   z-index: 1;
-  width: 7px;
-  height: 7px;
-  margin-top: 5px;
-  flex: 0 0 7px;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  flex: 0 0 8px;
   border-radius: 50%;
-  background: #2f2f2f;
+  background: #b7b7b7;
 }
 .reasoning-step__body {
   min-width: 0;
@@ -629,15 +624,15 @@ async function scrollToBottom() {
   display: block;
 }
 .reasoning-step strong {
-  color: #494949;
-  font-size: 12px;
+  color: #686868;
+  font-size: 14px;
   font-weight: 650;
 }
 .reasoning-step small {
-  margin-top: 2px;
-  color: #878787;
-  font-size: 11px;
-  line-height: 1.5;
+  margin-top: 4px;
+  color: #a0a0a0;
+  font-size: 13px;
+  line-height: 1.55;
 }
 .reasoning-step code {
   overflow: auto;
@@ -706,6 +701,23 @@ async function scrollToBottom() {
 }
 .result-table {
   width: 100%;
+}
+.row-reference-button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  color: #5f6963;
+  background: transparent;
+  cursor: pointer;
+}
+.row-reference-button:hover,
+.row-reference-button:focus-visible {
+  outline: 0;
+  color: #202b26;
+  background: #eaf1ed;
 }
 .result-empty {
   padding: 24px 14px;
@@ -907,10 +919,65 @@ async function scrollToBottom() {
     grid-template-columns: 1fr;
   }
   .message-list {
+    gap: 25px;
+    padding-inline: 0;
     padding-top: 16px;
   }
   .message-bubble {
-    max-width: calc(100% - 42px);
+    max-width: 100%;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  .message-bubble > p {
+    max-width: none;
+    padding: 10px 14px;
+    overflow-wrap: normal;
+  }
+  .message-row--assistant .message-bubble > p {
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  .message-answer {
+    margin-top: 14px !important;
+  }
+  .intent-pill {
+    margin-top: 8px;
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+  .reasoning-timeline {
+    width: auto;
+    margin-top: 14px;
+    padding: 12px 13px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+  .reasoning-timeline__title {
+    margin-bottom: 11px;
+    font-size: 11px;
+  }
+  .reasoning-step {
+    gap: 9px;
+    padding-bottom: 12px;
+  }
+  .reasoning-step:not(:last-child)::before {
+    top: 10px;
+    left: 3px;
+  }
+  .reasoning-step__dot {
+    width: 7px;
+    height: 7px;
+    margin-top: 5px;
+    flex-basis: 7px;
+  }
+  .reasoning-step strong {
+    font-size: 12px;
+  }
+  .reasoning-step small {
+    margin-top: 2px;
+    font-size: 11px;
+    line-height: 1.5;
   }
   .composer-wrap {
     width: calc(100% - 24px);

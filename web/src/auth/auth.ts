@@ -1,24 +1,40 @@
+import { fetchSession, loginSession, logoutSession } from "@/api/client";
 import type { LoginCredentials } from "@/auth/types";
 
-export const AUTH_STORAGE_KEY = "chain-nl2sql-authenticated";
-
-const demoUsername = (import.meta.env.VITE_DEMO_USERNAME || "admin").trim();
-const demoPassword = import.meta.env.VITE_DEMO_PASSWORD || "";
+let authenticated = false;
+let username = "admin";
 
 export function getDemoUsername(): string {
-  return demoUsername;
+  return username;
 }
 
-export function isAuthenticated(): boolean {
-  return window.localStorage.getItem(AUTH_STORAGE_KEY) === "true";
+export async function isAuthenticated(): Promise<boolean> {
+  try {
+    const session = await fetchSession();
+    authenticated = session.authenticated;
+    username = session.username || username;
+  } catch {
+    authenticated = false;
+  }
+  return authenticated;
 }
 
-export function login(credentials: LoginCredentials): boolean {
-  const valid = credentials.username.trim() === demoUsername && credentials.password === demoPassword;
-  if (valid) window.localStorage.setItem(AUTH_STORAGE_KEY, "true");
-  return valid;
+export async function login(credentials: LoginCredentials): Promise<boolean> {
+  try {
+    const session = await loginSession(credentials);
+    authenticated = session.authenticated;
+    username = session.username || username;
+    return authenticated;
+  } catch {
+    authenticated = false;
+    return false;
+  }
 }
 
-export function logout(): void {
-  window.localStorage.removeItem(AUTH_STORAGE_KEY);
+export async function logout(): Promise<void> {
+  try {
+    await logoutSession();
+  } finally {
+    authenticated = false;
+  }
 }

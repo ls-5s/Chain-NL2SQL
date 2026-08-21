@@ -1,15 +1,27 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { Menu, MessageSquarePlus, Search, Sparkles, Trash2, X } from "lucide-vue-next";
+import {
+  Clock3,
+  Ellipsis,
+  Folder,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Puzzle,
+  Search,
+  SquarePen,
+  Trash2,
+  X,
+} from "lucide-vue-next";
 
-import { getDemoUsername } from "@/auth/auth";
 import { provideAgentConversationStore } from "@/composables/agentConversations";
 
+const AGENT_SIDEBAR_COLLAPSED_STORAGE_KEY = "chain-nl2sql-agent-sidebar-collapsed-v1";
+
 const store = provideAgentConversationStore();
-const currentUser = getDemoUsername();
 const searchQuery = ref("");
 const searchOpen = ref(false);
 const drawerOpen = ref(false);
+const desktopCollapsed = ref(readCollapsedPreference());
 
 const filteredConversations = computed(() => {
   const query = searchQuery.value.trim().toLocaleLowerCase();
@@ -18,6 +30,26 @@ const filteredConversations = computed(() => {
     conversation.title.toLocaleLowerCase().includes(query),
   );
 });
+
+function readCollapsedPreference() {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(AGENT_SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
+}
+
+function setDesktopCollapsed(collapsed: boolean) {
+  desktopCollapsed.value = collapsed;
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(AGENT_SIDEBAR_COLLAPSED_STORAGE_KEY, String(collapsed));
+  }
+}
+
+function openSidebar() {
+  if (typeof window !== "undefined" && window.matchMedia("(max-width: 760px)").matches) {
+    drawerOpen.value = true;
+    return;
+  }
+  setDesktopCollapsed(false);
+}
 
 function createConversation() {
   store.createConversation();
@@ -36,15 +68,15 @@ function closeSearch() {
 </script>
 
 <template>
-  <div class="agent-layout">
+  <div class="agent-layout" :class="{ 'agent-layout--collapsed': desktopCollapsed }">
     <button
       class="agent-sidebar-toggle"
       type="button"
       aria-label="打开会话列表"
       title="打开会话列表"
-      @click="drawerOpen = true"
+      @click="openSidebar"
     >
-      <Menu :size="20" aria-hidden="true" />
+      <PanelLeftOpen :size="19" aria-hidden="true" />
     </button>
 
     <button
@@ -57,88 +89,102 @@ function closeSearch() {
 
     <aside class="agent-sidebar" :class="{ 'agent-sidebar--open': drawerOpen }" aria-label="会话列表">
       <header class="agent-sidebar__header">
-        <div class="agent-sidebar__brand">
-          <span class="agent-sidebar__brand-mark" aria-hidden="true"><Sparkles :size="17" /></span>
-          <span><strong>Chain</strong><small>数据助理</small></span>
-        </div>
-        <button
-          class="agent-sidebar__close"
-          type="button"
-          aria-label="关闭会话列表"
-          title="关闭会话列表"
-          @click="drawerOpen = false"
-        >
-          <X :size="19" aria-hidden="true" />
-        </button>
+        <template v-if="searchOpen">
+          <label class="agent-search">
+            <Search :size="17" aria-hidden="true" />
+            <input v-model="searchQuery" type="search" placeholder="搜索会话" aria-label="搜索会话" />
+            <button type="button" aria-label="关闭搜索" title="关闭搜索" @click="closeSearch">
+              <X :size="16" aria-hidden="true" />
+            </button>
+          </label>
+        </template>
+        <template v-else>
+          <div class="agent-sidebar__brand" aria-label="Chain 数据助理">
+            <strong>Chain</strong><span>数据助理</span>
+          </div>
+          <div class="agent-sidebar__header-actions">
+            <button
+              class="agent-sidebar__icon-button"
+              type="button"
+              aria-label="搜索会话"
+              title="搜索会话"
+              @click="searchOpen = true"
+            >
+              <Search :size="19" aria-hidden="true" />
+            </button>
+            <button
+              class="agent-sidebar__collapse"
+              type="button"
+              aria-label="收起会话列表"
+              title="收起会话列表"
+              @click="setDesktopCollapsed(true)"
+            >
+              <PanelLeftClose :size="19" aria-hidden="true" />
+            </button>
+            <button
+              class="agent-sidebar__close"
+              type="button"
+              aria-label="关闭会话列表"
+              title="关闭会话列表"
+              @click="drawerOpen = false"
+            >
+              <X :size="19" aria-hidden="true" />
+            </button>
+          </div>
+        </template>
       </header>
 
-      <div class="agent-sidebar__tools">
-        <label v-if="searchOpen" class="agent-search">
-          <Search :size="17" aria-hidden="true" />
-          <input v-model="searchQuery" type="search" placeholder="搜索会话" aria-label="搜索会话" />
-          <button type="button" aria-label="关闭搜索" title="关闭搜索" @click="closeSearch">
-            <X :size="15" aria-hidden="true" />
-          </button>
-        </label>
+      <div class="agent-sidebar__body">
         <button
-          v-else
-          class="agent-sidebar__icon-button"
-          type="button"
-          aria-label="搜索会话"
-          title="搜索会话"
-          @click="searchOpen = true"
-        >
-          <Search :size="18" aria-hidden="true" />
-        </button>
-        <button
-          v-if="!searchOpen"
           class="agent-sidebar__new-button"
           type="button"
           :disabled="store.isBusy.value"
           @click="createConversation"
         >
-          <MessageSquarePlus :size="19" aria-hidden="true" />
+          <SquarePen :size="20" :stroke-width="1.9" aria-hidden="true" />
           <span>新聊天</span>
         </button>
+
+        <nav class="agent-sidebar__shortcuts" aria-label="Agent 功能">
+          <span aria-disabled="true"><Folder :size="21" :stroke-width="1.8" aria-hidden="true" />项目</span>
+          <span aria-disabled="true"><Clock3 :size="21" :stroke-width="1.8" aria-hidden="true" />已安排</span>
+          <span aria-disabled="true"><Puzzle :size="21" :stroke-width="1.8" aria-hidden="true" />插件</span>
+          <span aria-disabled="true"><Ellipsis :size="22" :stroke-width="2.2" aria-hidden="true" />更多</span>
+        </nav>
+
+        <section class="agent-sidebar__history" aria-label="最近会话">
+          <h2>最近</h2>
+          <p v-if="!filteredConversations.length" class="agent-sidebar__empty">没有匹配的会话</p>
+          <ul v-else>
+            <li v-for="conversation in filteredConversations" :key="conversation.id">
+              <div
+                class="agent-sidebar__conversation-row"
+                :class="{ 'agent-sidebar__conversation-row--active': conversation.id === store.activeConversationId.value }"
+              >
+                <button
+                  class="agent-sidebar__conversation"
+                  type="button"
+                  :disabled="store.isBusy.value"
+                  :title="conversation.title"
+                  @click="selectConversation(conversation.id)"
+                >
+                  <span>{{ conversation.title }}</span>
+                </button>
+                <button
+                  class="agent-sidebar__delete"
+                  type="button"
+                  :disabled="store.isBusy.value"
+                  :aria-label="`删除会话 ${conversation.title}`"
+                  title="删除会话"
+                  @click="store.deleteConversation(conversation.id)"
+                >
+                  <Trash2 :size="15" aria-hidden="true" />
+                </button>
+              </div>
+            </li>
+          </ul>
+        </section>
       </div>
-
-      <section class="agent-sidebar__history" aria-label="最近会话">
-        <h2>最近会话</h2>
-        <p v-if="!filteredConversations.length" class="agent-sidebar__empty">没有匹配的会话</p>
-        <ul v-else>
-          <li v-for="conversation in filteredConversations" :key="conversation.id">
-            <div
-              class="agent-sidebar__conversation-row"
-              :class="{ 'agent-sidebar__conversation-row--active': conversation.id === store.activeConversationId.value }"
-            >
-              <button
-                class="agent-sidebar__conversation"
-                type="button"
-                :disabled="store.isBusy.value"
-                :title="conversation.title"
-                @click="selectConversation(conversation.id)"
-              >
-                <span>{{ conversation.title }}</span>
-              </button>
-              <button
-                class="agent-sidebar__delete"
-                type="button"
-                :disabled="store.isBusy.value"
-                :aria-label="`删除会话 ${conversation.title}`"
-                title="删除会话"
-                @click="store.deleteConversation(conversation.id)"
-              >
-                <Trash2 :size="15" aria-hidden="true" />
-              </button>
-            </div>
-          </li>
-        </ul>
-      </section>
-
-      <footer class="agent-sidebar__account">
-        <img src="/user-avatar.jpg" alt="" />
-        <span>{{ currentUser }}</span>
-      </footer>
     </aside>
 
     <section class="agent-layout__content">
@@ -164,72 +210,50 @@ function closeSearch() {
   width: 304px;
   flex: 0 0 304px;
   flex-direction: column;
-  border-right: 1px solid #e8e8e8;
+  border-right: 1px solid #e6e6e6;
   background: #fbfbfb;
-}
-
-.agent-sidebar__header,
-.agent-sidebar__tools,
-.agent-sidebar__account {
-  flex: 0 0 auto;
-  padding-inline: 14px;
 }
 
 .agent-sidebar__header {
   display: flex;
-  height: 64px;
+  height: 62px;
+  flex: 0 0 62px;
   align-items: center;
-  justify-content: space-between;
+  gap: 10px;
+  padding: 0 13px 0 16px;
 }
 
 .agent-sidebar__brand {
   display: flex;
   min-width: 0;
-  align-items: center;
-  gap: 9px;
-}
-
-.agent-sidebar__brand-mark {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  flex: 0 0 auto;
-  place-items: center;
-  border-radius: 8px;
-  color: #ffffff;
-  background: #202b26;
-}
-
-.agent-sidebar__brand strong,
-.agent-sidebar__brand small {
-  display: block;
+  flex: 1;
+  align-items: baseline;
+  gap: 5px;
+  color: #202123;
 }
 
 .agent-sidebar__brand strong {
-  color: #202123;
-  font-size: 15px;
+  font-size: 20px;
   font-weight: 700;
 }
 
-.agent-sidebar__brand small {
-  margin-top: 1px;
-  color: #888888;
-  font-size: 11px;
+.agent-sidebar__brand span {
+  color: #8b8b8b;
+  font-size: 18px;
+  font-weight: 400;
 }
 
-.agent-sidebar__close {
-  display: none;
-}
-
-.agent-sidebar__tools {
+.agent-sidebar__header-actions {
   display: flex;
-  gap: 8px;
-  padding-bottom: 13px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
 }
 
 .agent-sidebar__icon-button,
+.agent-sidebar__collapse,
+.agent-sidebar__close,
 .agent-sidebar__new-button,
-.agent-search,
 .agent-search button,
 .agent-sidebar__delete {
   border: 0;
@@ -237,64 +261,43 @@ function closeSearch() {
   font: inherit;
 }
 
-.agent-sidebar__icon-button {
+.agent-sidebar__icon-button,
+.agent-sidebar__collapse,
+.agent-sidebar__close {
   display: grid;
-  width: 40px;
-  height: 40px;
-  flex: 0 0 40px;
+  width: 34px;
+  height: 34px;
   place-items: center;
-  border-radius: 8px;
-  color: #5f6963;
+  border-radius: 7px;
+  color: #747474;
   cursor: pointer;
 }
 
 .agent-sidebar__icon-button:hover,
-.agent-sidebar__icon-button:focus-visible {
+.agent-sidebar__icon-button:focus-visible,
+.agent-sidebar__collapse:hover,
+.agent-sidebar__collapse:focus-visible,
+.agent-sidebar__close:hover,
+.agent-sidebar__close:focus-visible {
   outline: 0;
-  color: #202b26;
-  background: #eeeeee;
-}
-
-.agent-sidebar__new-button {
-  display: flex;
-  min-width: 0;
-  height: 40px;
-  flex: 1;
-  align-items: center;
-  gap: 9px;
-  border-radius: 8px;
-  padding: 0 12px;
   color: #202123;
   background: #eeeeee;
-  font-size: 14px;
-  font-weight: 600;
-  text-align: left;
-  cursor: pointer;
 }
 
-.agent-sidebar__new-button:hover:not(:disabled),
-.agent-sidebar__new-button:focus-visible:not(:disabled) {
-  outline: 0;
-  background: #e4e4e4;
-}
-
-.agent-sidebar__new-button:disabled,
-.agent-sidebar__conversation:disabled,
-.agent-sidebar__delete:disabled {
-  cursor: default;
-  opacity: 0.55;
+.agent-sidebar__close {
+  display: none;
 }
 
 .agent-search {
   display: flex;
   width: 100%;
-  height: 40px;
+  height: 38px;
   align-items: center;
-  gap: 7px;
-  border: 1px solid #d8d8d8;
-  border-radius: 8px;
-  padding: 0 8px 0 11px;
-  color: #727272;
+  gap: 8px;
+  border: 1px solid #d7d7d7;
+  border-radius: 7px;
+  padding: 0 7px 0 10px;
+  color: #757575;
   background: #ffffff;
 }
 
@@ -310,36 +313,112 @@ function closeSearch() {
   outline: 0;
   color: #202123;
   background: transparent;
-  font: 13px var(--font-sans);
+  font: 14px var(--font-sans);
 }
 
 .agent-search button {
   display: grid;
-  width: 24px;
-  height: 24px;
+  width: 25px;
+  height: 25px;
   place-items: center;
   border-radius: 5px;
   color: inherit;
   cursor: pointer;
 }
 
-.agent-search button:hover {
+.agent-search button:hover,
+.agent-search button:focus-visible {
+  outline: 0;
   background: #f0f0f0;
+}
+
+.agent-sidebar__body {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 1px 9px 16px;
+  scrollbar-color: #cccccc transparent;
+  scrollbar-width: thin;
+}
+
+.agent-sidebar__body::-webkit-scrollbar {
+  width: 7px;
+}
+
+.agent-sidebar__body::-webkit-scrollbar-thumb {
+  border-radius: 8px;
+  background: #cccccc;
+}
+
+.agent-sidebar__new-button {
+  display: flex;
+  width: 100%;
+  height: 43px;
+  align-items: center;
+  gap: 10px;
+  border-radius: 10px;
+  padding: 0 12px;
+  color: #202123;
+  background: #ebebeb;
+  font-size: 15px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-sidebar__new-button:hover:not(:disabled),
+.agent-sidebar__new-button:focus-visible:not(:disabled) {
+  outline: 0;
+  background: #e3e3e3;
+}
+
+.agent-sidebar__new-button:disabled,
+.agent-sidebar__conversation:disabled,
+.agent-sidebar__delete:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.agent-sidebar__shortcuts {
+  display: grid;
+  gap: 1px;
+  margin: 8px 0 25px;
+}
+
+.agent-sidebar__shortcuts a,
+.agent-sidebar__shortcuts span {
+  display: flex;
+  height: 38px;
+  align-items: center;
+  gap: 10px;
+  border-radius: 7px;
+  padding: 0 11px;
+  color: #303030;
+  font-size: 15px;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.agent-sidebar__shortcuts a:hover,
+.agent-sidebar__shortcuts a:focus-visible {
+  outline: 0;
+  background: #eeeeee;
+}
+
+.agent-sidebar__shortcuts span[aria-disabled="true"] {
+  cursor: default;
 }
 
 .agent-sidebar__history {
   min-height: 0;
-  flex: 1;
-  overflow-y: auto;
-  padding: 9px 8px 18px;
 }
 
 .agent-sidebar__history h2 {
   margin: 0;
-  padding: 0 7px 8px;
-  color: #8a8a8a;
-  font-size: 12px;
-  font-weight: 600;
+  padding: 0 11px 9px;
+  color: #919191;
+  font-size: 14px;
+  font-weight: 400;
 }
 
 .agent-sidebar__history ul {
@@ -363,10 +442,10 @@ function closeSearch() {
   align-items: center;
   border: 0;
   border-radius: 7px;
-  padding: 0 34px 0 9px;
-  color: #3f3f3f;
+  padding: 0 35px 0 11px;
+  color: #343434;
   background: transparent;
-  font: 13px var(--font-sans);
+  font: 14px var(--font-sans);
   text-align: left;
   cursor: pointer;
 }
@@ -413,27 +492,9 @@ function closeSearch() {
 }
 
 .agent-sidebar__empty {
-  margin: 16px 7px;
+  margin: 16px 11px;
   color: #929292;
   font-size: 13px;
-}
-
-.agent-sidebar__account {
-  display: flex;
-  height: 62px;
-  align-items: center;
-  gap: 9px;
-  border-top: 1px solid #e8e8e8;
-  color: #4b4b4b;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.agent-sidebar__account img {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  object-fit: cover;
 }
 
 .agent-layout__content {
@@ -446,7 +507,39 @@ function closeSearch() {
   display: none;
 }
 
+.agent-layout--collapsed .agent-sidebar {
+  display: none;
+}
+
+.agent-layout--collapsed .agent-sidebar-toggle {
+  position: fixed;
+  top: 10px;
+  left: 66px;
+  z-index: 10;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid #e4e4e4;
+  border-radius: 7px;
+  color: #4d4d4d;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+}
+
+.agent-sidebar-toggle:hover,
+.agent-sidebar-toggle:focus-visible {
+  outline: 0;
+  color: #202b26;
+  background: #ffffff;
+}
+
 @media (max-width: 760px) {
+  .agent-layout--collapsed .agent-sidebar {
+    display: flex;
+  }
+
   .agent-sidebar {
     position: fixed;
     top: 0;
@@ -464,25 +557,16 @@ function closeSearch() {
     transform: translateX(0);
   }
 
+  .agent-sidebar__collapse {
+    display: none;
+  }
+
   .agent-sidebar__close {
     display: grid;
-    width: 34px;
-    height: 34px;
-    place-items: center;
-    border: 0;
-    border-radius: 7px;
-    color: #5e5e5e;
-    background: transparent;
-    cursor: pointer;
   }
 
-  .agent-sidebar__close:hover,
-  .agent-sidebar__close:focus-visible {
-    outline: 0;
-    background: #eeeeee;
-  }
-
-  .agent-sidebar-toggle {
+  .agent-sidebar-toggle,
+  .agent-layout--collapsed .agent-sidebar-toggle {
     position: fixed;
     top: 10px;
     left: 66px;
@@ -497,13 +581,6 @@ function closeSearch() {
     background: rgba(255, 255, 255, 0.94);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
     cursor: pointer;
-  }
-
-  .agent-sidebar-toggle:hover,
-  .agent-sidebar-toggle:focus-visible {
-    outline: 0;
-    color: #202b26;
-    background: #ffffff;
   }
 
   .agent-sidebar-backdrop {
@@ -524,7 +601,8 @@ function closeSearch() {
     flex-basis: min(304px, calc(100vw - 52px));
   }
 
-  .agent-sidebar-toggle {
+  .agent-sidebar-toggle,
+  .agent-layout--collapsed .agent-sidebar-toggle {
     left: 62px;
   }
 

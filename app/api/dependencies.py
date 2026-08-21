@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from fastapi import Request
 
+from app.api.auth import require_authenticated
 from app.api.authorization import AccessPolicy, local_access_policy
 from app.config.settings import Settings, get_settings
 
@@ -16,6 +17,7 @@ class RequestContext:
     """携带请求关联 ID 和服务端解析出的访问策略。"""
 
     request_id: str
+    user_id: str
     access_policy: AccessPolicy
 
 
@@ -25,5 +27,6 @@ def get_request_context(request: Request) -> RequestContext:
     request_id = request.headers.get("X-Request-ID") or str(uuid4())
     return RequestContext(
         request_id=request_id,
+        user_id=require_authenticated(request),
         access_policy=local_access_policy(settings),
     )
