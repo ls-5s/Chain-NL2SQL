@@ -44,7 +44,7 @@ app/
 ├── llm/
 │   ├── client.py             # LLMClient 协议和 ModelResponse
 │   ├── factory.py            # OpenAI 兼容 ChatModel 适配
-│   ├── prompts.py            # 意图、SQL、通用回答和澄清 Prompt
+│   ├── prompts.py            # 意图、SQL 和通用回答 Prompt
 │   ├── output_parser.py      # 模型 SQL 输出提取
 │   └── retry_policy.py       # LLM 超时和有限重试
 ├── db/

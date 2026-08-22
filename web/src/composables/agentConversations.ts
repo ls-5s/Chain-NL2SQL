@@ -150,8 +150,8 @@ export function createAgentConversationStore(): AgentConversationStore {
   }
 
   async function selectConversation(conversationId: string) {
-    if (conversationId === activeConversationId.value) return;
     const requestId = ++selectionRequest;
+    if (conversationId === activeConversationId.value) return;
     if (conversationDetails.value[conversationId]) {
       activeConversationId.value = conversationId;
       if (drafts.value[conversationId] === undefined) {

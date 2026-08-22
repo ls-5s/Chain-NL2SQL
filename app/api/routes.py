@@ -480,7 +480,6 @@ def _node_message(node: str) -> str:
         "validate_sql": "正在校验 SQL 安全性",
         "execute_sql": "正在执行查询",
         "general_answer": "正在生成通用回答",
-        "clarify": "正在确认查询目标",
         "finalize": "正在整理查询结果",
     }.get(node, "正在处理查询")
 
@@ -494,8 +493,8 @@ def _node_explanation(node: str, state: dict[str, Any]) -> str:
         if intent == "general_chat":
             return "问题不需要本地业务数据，将交由通用问答模型处理。"
         if state.get("intent_classification_valid") is False:
-            return "分类置信度不足或格式无效，已保守转入查询目标澄清，不访问数据库。"
-        return "问题可能与数据有关但查询目标不完整，将先请求补充信息。"
+            return "分类置信度不足或格式无效，已转为通用回答，不访问数据库。"
+        return "问题信息不足，将交由通用问答模型处理。"
     if node == "retrieve_schema":
         count = len(state.get("schema_context", []))
         return f"读取服务端允许访问的 Schema，共获得 {count} 张表的结构信息。"

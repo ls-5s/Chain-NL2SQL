@@ -13,9 +13,11 @@ vi.mock("@/api/client", () => api);
 import { createAgentConversationStore } from "@/composables/agentConversations";
 
 const summary = { id: "c1", title: "新聊天", database_id: "demo", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z", message_count: 0 };
+const summary2 = { ...summary, id: "c2", title: "第二个会话" };
+const summary3 = { ...summary, id: "c3", title: "第三个会话" };
 
-function detail(messages: object[] = []) {
-  return { ...summary, messages };
+function detail(messages: object[] = [], conversation = summary) {
+  return { ...conversation, messages };
 }
 
 function deferred<T>() {
@@ -142,6 +144,96 @@ describe("agent conversations", () => {
 
     expect(api.fetchConversation).toHaveBeenCalledTimes(2);
     expect(store.activeConversation.value.messages).toEqual(persistedMessages);
+  });
+
+  it("allows switching sessions while a query is pending without switching back on completion", async () => {
+    const completed = deferred<object>();
+    api.fetchConversations.mockResolvedValue([summary, summary2]);
+    api.fetchConversation.mockImplementation(async (conversationId: string) =>
+      detail([], conversationId === "c2" ? summary2 : summary),
+    );
+    api.streamConversationQuery.mockImplementation(async () => completed.promise);
+    const store = createAgentConversationStore();
+    await store.initialize();
+
+    const send = store.sendQuestion("查询会话一", vi.fn());
+    expect(store.isConversationBusy("c1")).toBe(true);
+
+    await store.selectConversation("c2");
+    expect(store.activeConversationId.value).toBe("c2");
+    expect(store.isBusy.value).toBe(false);
+
+    completed.resolve({ request_id: "r1", status: "succeeded", final_answer: "完成" });
+    await send;
+
+    expect(store.activeConversationId.value).toBe("c2");
+    expect(store.isConversationBusy("c1")).toBe(false);
+  });
+
+  it("keeps query state independent so two sessions can stream concurrently", async () => {
+    const first = deferred<object>();
+    const second = deferred<object>();
+    api.fetchConversations.mockResolvedValue([summary, summary2]);
+    api.fetchConversation.mockImplementation(async (conversationId: string) =>
+      detail([], conversationId === "c2" ? summary2 : summary),
+    );
+    api.streamConversationQuery.mockImplementation((conversationId: string) =>
+      conversationId === "c1" ? first.promise : second.promise,
+    );
+    const store = createAgentConversationStore();
+    await store.initialize();
+
+    const firstSend = store.sendQuestion("查询会话一", vi.fn());
+    await store.selectConversation("c2");
+    const secondSend = store.sendQuestion("查询会话二", vi.fn());
+
+    expect(store.isConversationBusy("c1")).toBe(true);
+    expect(store.isConversationBusy("c2")).toBe(true);
+    expect(store.isBusy.value).toBe(true);
+
+    second.resolve({ request_id: "r2", status: "succeeded", final_answer: "第二个完成" });
+    await secondSend;
+    expect(store.isConversationBusy("c1")).toBe(true);
+    expect(store.isBusy.value).toBe(false);
+
+    first.resolve({ request_id: "r1", status: "succeeded", final_answer: "第一个完成" });
+    await firstSend;
+    expect(store.isConversationBusy("c1")).toBe(false);
+  });
+
+  it("keeps the latest selection when session loads finish out of order", async () => {
+    const secondDetail = deferred<object>();
+    const thirdDetail = deferred<object>();
+    api.fetchConversations.mockResolvedValue([summary, summary2, summary3]);
+    api.fetchConversation.mockImplementation((conversationId: string) => {
+      if (conversationId === "c2") return secondDetail.promise;
+      if (conversationId === "c3") return thirdDetail.promise;
+      return Promise.resolve(detail());
+    });
+    const store = createAgentConversationStore();
+    await store.initialize();
+
+    const selectSecond = store.selectConversation("c2");
+    const selectThird = store.selectConversation("c3");
+    secondDetail.resolve(detail([], summary2));
+    thirdDetail.resolve(detail([], summary3));
+    await Promise.all([selectSecond, selectThird]);
+
+    expect(store.activeConversationId.value).toBe("c3");
+  });
+
+  it("does not delete a session while its query is running", async () => {
+    const completed = deferred<object>();
+    api.streamConversationQuery.mockImplementation(async () => completed.promise);
+    const store = createAgentConversationStore();
+    await store.initialize();
+
+    const send = store.sendQuestion("查询用户数量", vi.fn());
+    await store.deleteConversation("c1");
+
+    expect(api.deleteConversation).not.toHaveBeenCalled();
+    completed.resolve({ request_id: "r1", status: "succeeded", final_answer: "完成" });
+    await send;
   });
 
   it("writes the completed response to the optimistic assistant message", async () => {

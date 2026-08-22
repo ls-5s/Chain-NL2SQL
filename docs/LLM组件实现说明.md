@@ -62,7 +62,7 @@ class LLMClient(Protocol):
 
 ## 5. Prompt
 
-[`app/llm/prompts.py`](../app/llm/prompts.py) 提供意图、通用回答、澄清、SQL 生成和 SQL 修复等 `ChatPromptTemplate`：
+[`app/llm/prompts.py`](../app/llm/prompts.py) 提供意图、通用回答、SQL 生成和 SQL 修复等 `ChatPromptTemplate`：
 
 - `build_sql_generation_prompt()`：首次根据问题、数据库方言与 Schema 上下文生成 SQL。
 - `build_sql_repair_prompt()`：根据原问题、固定 Schema、失败 SQL 与已脱敏错误信息修复 SQL。
