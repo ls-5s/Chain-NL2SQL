@@ -4,11 +4,13 @@ import { useRouter } from "vue-router";
 import {
   CircleHelp,
   Database,
+  Blocks,
   LibraryBig,
   Menu,
   Search,
   Sparkles,
   UserRound,
+  UsersRound,
   X,
 } from "lucide-vue-next";
 import AccountMenu from "@/components/AccountMenu.vue";
@@ -130,6 +132,42 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleAgentShortcut)
             RAG 资料库
           </span>
         </RouterLink>
+        <RouterLink
+          class="rail-link rail-link--tooltip"
+          to="/databases"
+          active-class="rail-link--active"
+          aria-label="数据库"
+          aria-describedby="databases-tooltip"
+        >
+          <Database :size="23" :stroke-width="1.8" aria-hidden="true" />
+          <span id="databases-tooltip" class="rail-tooltip rail-tooltip--label" role="tooltip">
+            数据库
+          </span>
+        </RouterLink>
+        <RouterLink
+          class="rail-link rail-link--tooltip"
+          to="/mcp"
+          active-class="rail-link--active"
+          aria-label="MCP"
+          aria-describedby="mcp-tooltip"
+        >
+          <Blocks :size="23" :stroke-width="1.8" aria-hidden="true" />
+          <span id="mcp-tooltip" class="rail-tooltip rail-tooltip--label" role="tooltip">
+            MCP
+          </span>
+        </RouterLink>
+        <RouterLink
+          class="rail-link rail-link--tooltip"
+          to="/members"
+          active-class="rail-link--active"
+          aria-label="成员"
+          aria-describedby="members-tooltip"
+        >
+          <UsersRound :size="23" :stroke-width="1.8" aria-hidden="true" />
+          <span id="members-tooltip" class="rail-tooltip rail-tooltip--label" role="tooltip">
+            成员
+          </span>
+        </RouterLink>
       </nav>
 
       <div class="rail-bottom">
@@ -173,6 +211,15 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleAgentShortcut)
         >
         <RouterLink to="/rag" @click="closeMobileNavigation"
           ><LibraryBig :size="19" />RAG 资料库</RouterLink
+        >
+        <RouterLink to="/databases" @click="closeMobileNavigation"
+          ><Database :size="19" />数据库</RouterLink
+        >
+        <RouterLink to="/mcp" @click="closeMobileNavigation"
+          ><Blocks :size="19" />MCP</RouterLink
+        >
+        <RouterLink to="/members" @click="closeMobileNavigation"
+          ><UsersRound :size="19" />成员</RouterLink
         >
       </nav>
     </dialog>

@@ -5,6 +5,9 @@ import Agentyout from "@/layouts/Agentyout.vue";
 import LoginView from "@/views/LoginView.vue";
 import AgentView from "@/views/AgentView.vue";
 import RagView from "@/views/RagView.vue";
+import DatabasesView from "@/views/DatabasesView.vue";
+import McpView from "@/views/McpView.vue";
+import MembersView from "@/views/MembersView.vue";
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -27,6 +30,24 @@ export const router = createRouter({
       name: "rag",
       component: RagView,
       meta: { navLabel: "RAG 资料库", navDescription: "检索增强知识管理" },
+    },
+    {
+      path: "/databases",
+      name: "databases",
+      component: DatabasesView,
+      meta: { navLabel: "数据库", navDescription: "数据库资源管理" },
+    },
+    {
+      path: "/mcp",
+      name: "mcp",
+      component: McpView,
+      meta: { navLabel: "MCP", navDescription: "MCP 工具连接" },
+    },
+    {
+      path: "/members",
+      name: "members",
+      component: MembersView,
+      meta: { navLabel: "成员", navDescription: "成员与权限管理" },
     },
   ],
 });

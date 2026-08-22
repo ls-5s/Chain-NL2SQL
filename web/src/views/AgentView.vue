@@ -13,6 +13,7 @@ import {
 
 import { createResultReference, fetchDatabases } from "@/api/client";
 import { useAgentConversationStore } from "@/composables/agentConversations";
+import { renderMarkdown } from "@/utils/markdown";
 import type {
   QueryIntent,
   QueryResponse,
@@ -216,7 +217,11 @@ async function scrollToBottom() {
               </div>
             </details>
 
-            <p v-if="message.role === 'assistant'" class="message-answer">{{ message.content }}</p>
+            <div
+              v-if="message.role === 'assistant'"
+              class="message-answer message-markdown"
+              v-html="renderMarkdown(message.content)"
+            />
             <span
               v-if="message.response && message.response.intent !== 'data_query'"
               :class="intentClass(message.response.intent)"
@@ -476,6 +481,95 @@ async function scrollToBottom() {
 .message-answer {
   margin-top: 16px !important;
   color: #303030;
+}
+.message-markdown {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.message-markdown :deep(p),
+.message-markdown :deep(ul),
+.message-markdown :deep(ol),
+.message-markdown :deep(blockquote),
+.message-markdown :deep(pre),
+.message-markdown :deep(h1),
+.message-markdown :deep(h2),
+.message-markdown :deep(h3),
+.message-markdown :deep(h4),
+.message-markdown :deep(h5),
+.message-markdown :deep(h6) {
+  margin: 0 0 14px;
+}
+.message-markdown :deep(p:last-child),
+.message-markdown :deep(ul:last-child),
+.message-markdown :deep(ol:last-child),
+.message-markdown :deep(blockquote:last-child),
+.message-markdown :deep(pre:last-child),
+.message-markdown :deep(h1:last-child),
+.message-markdown :deep(h2:last-child),
+.message-markdown :deep(h3:last-child),
+.message-markdown :deep(h4:last-child),
+.message-markdown :deep(h5:last-child),
+.message-markdown :deep(h6:last-child) {
+  margin-bottom: 0;
+}
+.message-markdown :deep(h1),
+.message-markdown :deep(h2),
+.message-markdown :deep(h3),
+.message-markdown :deep(h4),
+.message-markdown :deep(h5),
+.message-markdown :deep(h6) {
+  color: #202123;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.message-markdown :deep(h1) { font-size: 1.35em; }
+.message-markdown :deep(h2) { font-size: 1.25em; }
+.message-markdown :deep(h3) { font-size: 1.15em; }
+.message-markdown :deep(ul),
+.message-markdown :deep(ol) {
+  padding-left: 1.45em;
+}
+.message-markdown :deep(li + li) {
+  margin-top: 5px;
+}
+.message-markdown :deep(blockquote) {
+  border-left: 3px solid #d8d8d8;
+  padding-left: 14px;
+  color: #6d6d6d;
+}
+.message-markdown :deep(code) {
+  border-radius: 4px;
+  padding: 0.12em 0.35em;
+  color: #3f3f3f;
+  background: #f0f0f0;
+  font: 0.86em/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.message-markdown :deep(pre) {
+  overflow-x: auto;
+  border-radius: 7px;
+  padding: 12px 14px;
+  color: #e9edf0;
+  background: #282c34;
+  white-space: pre;
+}
+.message-markdown :deep(pre code) {
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  font-size: 0.78em;
+}
+.message-markdown :deep(a) {
+  color: #356fc4;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.message-markdown :deep(img) {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
 }
 .message-row--user .message-bubble > p {
   border-bottom-right-radius: 4px;
@@ -954,6 +1048,19 @@ async function scrollToBottom() {
   }
   .message-answer {
     margin-top: 14px !important;
+  }
+  .message-markdown :deep(p),
+  .message-markdown :deep(ul),
+  .message-markdown :deep(ol),
+  .message-markdown :deep(blockquote),
+  .message-markdown :deep(pre),
+  .message-markdown :deep(h1),
+  .message-markdown :deep(h2),
+  .message-markdown :deep(h3),
+  .message-markdown :deep(h4),
+  .message-markdown :deep(h5),
+  .message-markdown :deep(h6) {
+    margin-bottom: 11px;
   }
   .intent-pill {
     margin-top: 8px;
