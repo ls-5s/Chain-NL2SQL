@@ -23,20 +23,44 @@ INTENT_CONFIDENCE_THRESHOLD=0.75
 ```text
 app/
 ├── api/
-│   ├── routes.py             # FastAPI 查询入口、SSE 事件和资源边界
+│   ├── routes.py             # FastAPI 查询入口、SSE 事件、数据库管理和资源边界
 │   ├── dependencies.py       # RequestContext、请求 ID 和访问策略注入
+│   ├── auth.py               # 登录身份和管理员权限依赖
+│   ├── authorization.py      # 数据库、表和字段访问策略模型
 │   └── response_mapper.py    # Graph State 到安全响应模型的映射
+├── auth/
+│   └── repository.py         # 单账号登录、会话 Cookie 和账号状态持久化
+├── conversations/
+│   └── repository.py         # 分析会话、消息、SSE 进度和结果快照持久化
+├── config/
+│   ├── settings.py           # 环境变量和运行时配置
+│   └── validation.py         # 配置合法性校验
+├── schemas/
+│   ├── request.py            # HTTP 请求模型
+│   ├── response.py           # HTTP/SSE 响应模型
+│   └── domain.py             # Graph、Schema 和结果领域模型
 ├── graph/
 │   ├── builder.py            # StateGraph 构建、节点注册和条件路由
 │   ├── state.py              # NL2SQLState 与初始状态
+│   ├── routes.py             # Graph 条件路由辅助函数
 │   ├── intent_node.py        # 规则优先、LLM 兜底的意图分类
 │   ├── intent_rules.py       # 不访问数据库的高置信规则判断
-│   ├── generation_node.py    # 根据固定 Schema 生成只读 SQL
+│   ├── generation_node.py    # 根据检索到的 Schema 生成只读 SQL
 │   ├── validation_node.py    # SQL AST、安全策略和白名单校验
-│   ├── execution_node.py     # 受限 SQLite 查询执行
+│   ├── execution_node.py     # 受限数据库查询执行和 Schema 漂移检查
 │   ├── general_answer_node.py # 非数据库问题的通用回答
 │   ├── finalize_node.py      # 统一生成最终状态和用户说明
 │   └── repair_node.py        # 有限错误类别的 SQL 自动修复节点
+├── rag/
+│   ├── introspector.py       # SQLite/MySQL 元数据读取
+│   ├── normalizer.py         # 不同数据库元数据标准化
+│   ├── document_builder.py   # SchemaDocument 构建
+│   ├── index_manager.py      # 索引版本、构建和受控重建
+│   ├── vector_store.py       # Chroma 向量索引读写
+│   ├── bm25_store.py         # BM25 索引读写
+│   ├── hybrid_retriever.py   # 混合召回与去重
+│   ├── reranker.py           # 候选结果重排
+│   └── retriever.py          # SchemaRetriever 协议和兼容读取器
 ├── llm/
 │   ├── client.py             # LLMClient 协议和 ModelResponse
 │   ├── factory.py            # OpenAI 兼容 ChatModel 适配
@@ -44,24 +68,48 @@ app/
 │   ├── output_parser.py      # 模型 SQL 输出提取
 │   └── retry_policy.py       # LLM 超时和有限重试
 ├── db/
-│   ├── base.py               # DatabaseExecutor 协议
+│   ├── base.py               # DatabaseExecutor 协议和执行错误
 │   ├── sqlite_adapter.py     # Demo SQLite 只读适配器
+│   ├── mysql_adapter.py      # MySQL 只读适配器和 Schema 读取
+│   ├── registry.py           # 数据库注册和表级 Agent 权限持久化
+│   ├── connection_manager.py # 连接生命周期和超时管理
+│   ├── result_formatter.py   # 行数限制、截断和结果标准化
 │   └── security_policy.py    # SQL AST 只读和访问策略校验
+├── errors/
+│   ├── categories.py         # 稳定业务错误类别
+│   ├── classifier.py         # 驱动异常到业务错误分类
+│   └── redactor.py           # 错误、连接信息和 SQL 脱敏
+├── observability/
+│   ├── logging.py            # 结构化服务端日志
+│   ├── metrics.py            # 查询和修复指标
+│   └── trace.py              # 节点级 TraceEvent
 └── tool/
     └── database_query.py     # 可独立创建的数据库查询工具，当前 Graph 不自动调用
 
 tests/
 ├── unit/test_graph.py        # Graph 节点和意图分支测试
 ├── unit/test_sse.py          # SSE 事件顺序和响应测试
+├── unit/test_database_registry.py # 数据库注册、表同步和权限测试
+├── unit/test_database_tool.py # 独立数据库查询工具测试
+├── unit/test_schema_rag.py    # Schema-RAG 检索和索引测试
 └── fakes/fake_llm.py         # 离线模型替身
 
 web/src/
 ├── api/client.ts             # 后端 HTTP/SSE 客户端
 ├── types/api.ts              # 前端 API 和 SSE 类型
-└── views/QueryView.vue       # 查询聊天界面和流式进度展示
+├── composables/agentConversations.ts # 会话列表、消息和 SSE 状态
+├── views/AgentView.vue        # Agent 查询聊天界面和流式进度展示
+└── views/DatabasesView.vue    # 数据库配置、连接测试和表权限开关
 ```
 
-该目录说明只描述当前代码职责。Schema-RAG 已通过 `SchemaIndexManager` 接入查询 Graph；`repair_node.py` 已接入有限错误类别修复，MySQL 适配器和独立数据库工具仍属于预留能力。
+该目录说明只描述当前代码职责。Schema-RAG 已通过 `SchemaIndexManager` 接入查询 Graph，`repair_node.py` 已接入有限错误类别修复；MySQL 适配器、数据库注册、表级 Agent 权限和数据库管理页面均已实现。`database_query.py` 是可独立创建的只读工具，但当前 Graph 不自动调用。
+
+数据库管理边界如下：
+
+- `DatabaseRegistry` 只保存非敏感连接元数据和服务端凭据引用，不保存明文密码。
+- 管理员测试连接成功后，服务端读取并同步目标数据库的表清单；新同步的数据表默认 `agent_access=false`。
+- 只有显式开启 Agent 权限的表才会进入 Schema 检索、SQL 校验和执行策略；默认关闭可避免新表被意外暴露。
+- MySQL 密码仅通过服务端环境变量按 `credential_ref` 读取，密码、连接串和驱动原始异常不会写入 API 响应或本文档。
 
 ## 3. 完整流程图
 
@@ -75,7 +123,7 @@ flowchart TD
     AUTH[RequestContext<br/>请求 ID + AccessPolicy]
     DBCHK{数据库是否允许访问?}
     DBERR[HTTP 403/404]
-    DB[SQLiteAdapter<br/>只读数据库适配器]
+    DB[按 database_id 选择 SQLite/MySQL<br/>只读数据库适配器]
     LLM[OpenAI 兼容 LLMClient]
     GRAPH[LangGraph StateGraph]
     START[SSE start]
@@ -106,7 +154,7 @@ flowchart TD
     subgraph RAG[Schema-RAG 检索链路]
         RETRIEVE[retrieve_schema]
         REQ[SchemaRetrievalRequest<br/>问题 / database_id / dialect / 权限]
-        INSPECT[读取 SQLite Schema]
+        INSPECT[读取目标数据库 Schema]
         NORMALIZE[元数据标准化]
         DOC[构建 SchemaDocument]
         VERSION[计算 schema_version]
@@ -260,7 +308,7 @@ intent_gate
 
 ### 4.2 数据查询链路
 
-`retrieve_schema` 当前通过 `SchemaIndexManager` 读取 SQLite Schema，按 `SchemaRetrievalRequest` 携带的问题、数据库、方言和表/字段访问策略执行检索。默认使用 `hybrid` 模式：BM25 和 Chroma 向量候选使用 RRF 合并去重，可选 Reranker 重排，最终返回 `SCHEMA_TOP_K` 张表。检索索引按 `database_id/schema_version` 懒构建并持久化；向量或重排依赖不可用时默认降级为 BM25，无法使用 BM25 时返回 `schema_retrieval_error`。
+`retrieve_schema` 当前通过 `SchemaIndexManager` 读取已注册数据库的 Schema，按 `SchemaRetrievalRequest` 携带的问题、数据库、方言和表/字段访问策略执行检索。SQLite 和 MySQL 均通过对应的只读适配器提供元数据；默认使用 `hybrid` 模式：BM25 和 Chroma 向量候选使用 RRF 合并去重，可选 Reranker 重排，最终返回 `SCHEMA_TOP_K` 张表。检索索引按 `database_id/schema_version` 懒构建并持久化；向量或重排依赖不可用时默认降级为 BM25，无法使用 BM25 时返回 `schema_retrieval_error`。
 
 权限过滤在检索前执行。未授权的表和字段不会进入索引 scope、最终 `schema_context` 或 SQL Prompt。`generate_sql` 只接收过滤后的问题、方言和 Schema，要求输出一条 `SELECT` 或最终只读的 `WITH` 查询。`validate_sql` 使用 AST 和服务端白名单检查单语句、只读操作、允许表和允许字段；安全策略违规保持 `blocked`，语法错误可进入有限修复流程。
 
@@ -270,7 +318,7 @@ intent_gate
 
 ### 4.3 数据库工具边界
 
-[`sqlite_adapter.py`](../app/db/sqlite_adapter.py) 是当前 Graph 使用的实际数据库组件，只支持本地 `demo` SQLite。另有 [`database_query.py`](../app/tool/database_query.py) 提供 LangChain `query_database` `StructuredTool` 适配器，可被模型调用，但当前 Graph 仍固定调用 `DatabaseExecutor`，不是由模型自主选择工具。MySQL 适配器文件存在，但尚未在 API 数据库编排中启用。
+Graph 通过 `DatabaseExecutor` 协议访问数据库：`demo` 使用 [`sqlite_adapter.py`](../app/db/sqlite_adapter.py)，已注册的 MySQL 数据库使用 [`mysql_adapter.py`](../app/db/mysql_adapter.py)。API 根据 `database_id` 从 [`registry.py`](../app/db/registry.py) 读取非敏感连接配置并选择适配器；MySQL 凭据只通过服务端环境变量中的 `credential_ref` 读取。另有 [`database_query.py`](../app/tool/database_query.py) 提供 LangChain `query_database` `StructuredTool` 适配器，可被独立创建，但当前 Graph 仍固定调用 `DatabaseExecutor`，不是由模型自主选择工具。
 
 ## 5. 状态与响应
 
@@ -354,7 +402,7 @@ event: complete
 data: {"intent":"general_chat","status":"succeeded","result":null,"generated_sql":null}
 ```
 
-前端 [`web/src/api/client.ts`](../web/src/api/client.ts) 使用 `fetch` 读取 POST SSE 流；[`web/src/views/QueryView.vue`](../web/src/views/QueryView.vue) 实时展示 Agent 当前步骤。只有 `intent=data_query` 时展示数据库、结果表和 SQL 相关信息，通用回答仅展示回答内容及意图标签。
+前端 [`web/src/api/client.ts`](../web/src/api/client.ts) 使用 `fetch` 读取 POST SSE 流；[`web/src/views/AgentView.vue`](../web/src/views/AgentView.vue) 实时展示 Agent 当前步骤，并通过 `agentConversations.ts` 恢复服务端会话。数据库配置、连接测试、Schema 表同步和 Agent 表权限开关由 [`web/src/views/DatabasesView.vue`](../web/src/views/DatabasesView.vue) 提供。只有 `intent=data_query` 时展示数据库、结果表和 SQL 相关信息，通用回答仅展示回答内容及意图标签。
 
 ## 7. API 与资源边界
 
@@ -362,7 +410,7 @@ data: {"intent":"general_chat","status":"succeeded","result":null,"generated_sql
 
 1. 校验 `question`、`database_id` 和可选的 `max_iterations`（请求长度和范围由 Pydantic 约束）。
 2. 根据请求上下文检查服务端数据库白名单。
-3. 当前仅为 `demo` 创建 `SQLiteAdapter`；其他允许 ID 尚无 API 适配器时返回 `404`。
+3. 根据注册记录的方言创建 `SQLiteAdapter` 或 `MySQLAdapter`；未注册、禁用或不支持的数据库返回受控错误。
 4. 延迟创建 OpenAI 兼容 LLM 客户端；未配置时返回 `503`。
 5. 创建初始 `NL2SQLState` 并返回异步 Graph SSE 流。
 6. 在流结束或异常后关闭数据库适配器。
@@ -374,7 +422,7 @@ data: {"intent":"general_chat","status":"succeeded","result":null,"generated_sql
 | 场景 | 处理 |
 | --- | --- |
 | 数据库不在访问策略中 | HTTP `403` |
-| 数据库 ID 为 `demo` 之外且无适配器 | HTTP `404` |
+| 数据库未注册、已禁用或无可用适配器 | HTTP `404` |
 | 模型密钥或模型名称缺失 | HTTP `503` |
 | 意图分类 JSON 无效或置信度不足 | `general_chat`，不访问数据库 |
 | 流内模型调用失败 | SSE `error`，返回安全错误说明 |
@@ -433,7 +481,7 @@ SQL 执行前还会进行单语句、只读、表/字段白名单和 AST 检查�
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-当前后端测试基线为 **53 passed**。前端生产构建命令为：
+当前后端测试基线为 **66 passed**；前端 Vitest 基线为 **17 passed**。前端生产构建命令为：
 
 ```powershell
 node node_modules/vite/bin/vite.js build
@@ -446,7 +494,7 @@ node node_modules/vite/bin/vite.js build
 - 当前按单条用户消息进行意图判断，尚未把多轮聊天历史传入分类和回答 Prompt；“那上个月呢”需要后续上下文能力。
 - 当前 `data_query` 支持一次首轮生成和受 `max_iterations` 限制的有限 SQL 修复；更复杂的多轮对话和领域级错误分类仍待增强。
 - Schema-RAG 已通过 `SchemaIndexManager` 接入 Graph，支持 BM25、向量和 Hybrid 模式、权限过滤、索引版本管理和执行前 Schema 漂移校验；详细说明见 [`Schema-RAG实现说明.md`](Schema-RAG实现说明.md)。
-- 当前 API 只编排本地 `demo` SQLite；MySQL 等其他数据库适配器尚未接入数据库 ID 路由。
+- 当前 API 已按 `database_id` 编排 `demo` SQLite 和已注册 MySQL；MySQL 连接凭据仍要求通过服务端环境变量提供，且连接配置不会回显。
 - [`app/tool/database_query.py`](../app/tool/database_query.py) 的 LangChain `query_database` 工具可独立创建，但 Graph 当前不采用模型自主工具调用。
 - `trace` 是预留的可展示节点摘要字段；SSE 有实时进度，但完整节点耗时尚未持久化为 TraceEvent。
 - 通用问答模型不具备实时天气或外部系统访问能力，不应把通用回答解释为实时事实查询。
