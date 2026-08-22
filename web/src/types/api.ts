@@ -30,6 +30,27 @@ export interface LoginRequest {
 export interface SessionResponse {
   authenticated: boolean;
   username?: string | null;
+  role?: UserRole | null;
+}
+
+export type UserRole = "super_admin" | "member";
+
+export interface Member {
+  id: string;
+  username: string;
+  role: UserRole;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemberCreateRequest {
+  username: string;
+  password: string;
+}
+
+export interface MemberUpdateRequest {
+  username?: string;
+  password?: string;
 }
 
 export interface QueryResult {

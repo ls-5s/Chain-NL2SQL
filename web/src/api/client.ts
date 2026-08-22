@@ -11,6 +11,9 @@ import type {
   ConversationDetail,
   ConversationSummary,
   LoginRequest,
+  Member,
+  MemberCreateRequest,
+  MemberUpdateRequest,
   ResultReferenceResponse,
   SessionResponse,
 } from "@/types/api";
@@ -18,7 +21,10 @@ import type {
 const client = axios.create({ baseURL: "/api/v1", timeout: 20_000, withCredentials: true });
 
 export class ApiRequestError extends Error {
-  constructor(message: string, public readonly status?: number) {
+  constructor(
+    message: string,
+    public readonly status?: number,
+  ) {
     super(message);
   }
 }
@@ -26,7 +32,10 @@ export class ApiRequestError extends Error {
 function toApiError(error: unknown): ApiRequestError {
   if (error instanceof AxiosError) {
     const detail = error.response?.data?.detail;
-    return new ApiRequestError(typeof detail === "string" ? detail : "请求未能完成。", error.response?.status);
+    return new ApiRequestError(
+      typeof detail === "string" ? detail : "请求未能完成。",
+      error.response?.status,
+    );
   }
   return new ApiRequestError("无法连接到服务，请确认后端已启动。");
 }
@@ -66,6 +75,41 @@ export async function fetchSession(): Promise<SessionResponse> {
   }
 }
 
+export async function fetchMembers(): Promise<Member[]> {
+  try {
+    const { data } = await client.get<Member[]>("/members");
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+export async function createMember(payload: MemberCreateRequest): Promise<Member> {
+  try {
+    const { data } = await client.post<Member>("/members", payload);
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+export async function updateMember(id: string, payload: MemberUpdateRequest): Promise<Member> {
+  try {
+    const { data } = await client.patch<Member>(`/members/${id}`, payload);
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+export async function deleteMember(id: string): Promise<void> {
+  try {
+    await client.delete(`/members/${id}`);
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
 export async function fetchConversations(): Promise<ConversationSummary[]> {
   try {
     const { data } = await client.get<ConversationSummary[]>("/conversations");
@@ -77,7 +121,9 @@ export async function fetchConversations(): Promise<ConversationSummary[]> {
 
 export async function createConversation(databaseId: string): Promise<ConversationSummary> {
   try {
-    const { data } = await client.post<ConversationSummary>("/conversations", { database_id: databaseId });
+    const { data } = await client.post<ConversationSummary>("/conversations", {
+      database_id: databaseId,
+    });
     return data;
   } catch (error) {
     throw toApiError(error);
@@ -107,10 +153,13 @@ export async function createResultReference(
   rowIndex: number,
 ): Promise<ResultReferenceResponse> {
   try {
-    const { data } = await client.post<ResultReferenceResponse>(`/conversations/${conversationId}/references`, {
-      turn_id: turnId,
-      row_index: rowIndex,
-    });
+    const { data } = await client.post<ResultReferenceResponse>(
+      `/conversations/${conversationId}/references`,
+      {
+        turn_id: turnId,
+        row_index: rowIndex,
+      },
+    );
     return data;
   } catch (error) {
     throw toApiError(error);
@@ -169,7 +218,8 @@ export async function streamQuery(
       const data = JSON.parse(dataLine) as QueryStreamEvent & QueryResponse;
       if (eventName === "progress" || eventName === "start") onProgress(data);
       if (eventName === "complete") completed = data as QueryResponse;
-      if (eventName === "error") throw new ApiRequestError(data.detail || "查询服务暂时不可用。", data.status_code);
+      if (eventName === "error")
+        throw new ApiRequestError(data.detail || "查询服务暂时不可用。", data.status_code);
     }
   };
 
@@ -233,7 +283,8 @@ async function streamSse(
       const data = JSON.parse(dataLine) as QueryStreamEvent & QueryResponse;
       if (eventName === "progress" || eventName === "start") onProgress(data);
       if (eventName === "complete") completed = data as QueryResponse;
-      if (eventName === "error") throw new ApiRequestError(data.detail || "查询服务暂时不可用。", data.status_code);
+      if (eventName === "error")
+        throw new ApiRequestError(data.detail || "查询服务暂时不可用。", data.status_code);
     }
   };
   while (true) {
@@ -255,7 +306,10 @@ export async function fetchApprovals(): Promise<ApprovalItem[]> {
   }
 }
 
-export async function resolveApproval(id: string, status: Extract<ApprovalStatus, "approved" | "rejected">): Promise<ApprovalItem> {
+export async function resolveApproval(
+  id: string,
+  status: Extract<ApprovalStatus, "approved" | "rejected">,
+): Promise<ApprovalItem> {
   try {
     const { data } = await client.post<ApprovalItem>(`/approvals/${id}/resolve`, { status });
     return data;
@@ -273,7 +327,10 @@ export async function fetchKnowledgeDocuments(): Promise<KnowledgeDocument[]> {
   }
 }
 
-export async function uploadKnowledgeDocument(file: File, category: string): Promise<KnowledgeDocument> {
+export async function uploadKnowledgeDocument(
+  file: File,
+  category: string,
+): Promise<KnowledgeDocument> {
   try {
     const formData = new FormData();
     formData.append("file", file);
@@ -292,4 +349,3 @@ export async function deleteKnowledgeDocument(id: string): Promise<void> {
     throw toApiError(error);
   }
 }
-

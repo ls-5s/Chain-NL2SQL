@@ -7,7 +7,6 @@ import {
   ChevronDown,
   Database,
   LoaderCircle,
-  Mic,
   Plus,
 } from "lucide-vue-next";
 
@@ -41,7 +40,7 @@ async function resizeQuestionInput(input: HTMLTextAreaElement | null) {
   input.style.height = "auto";
   const styles = window.getComputedStyle(input);
   const minHeight = Number.parseFloat(styles.minHeight) || 0;
-  const maxHeight = Number.parseFloat(styles.maxHeight) || 130;
+  const maxHeight = Number.parseFloat(styles.maxHeight) || 180;
   const contentHeight = input.scrollHeight;
   const nextHeight = Math.min(Math.max(contentHeight, minHeight), maxHeight);
 
@@ -195,24 +194,6 @@ async function scrollToBottom() {
                 @keydown.enter.exact.prevent="handleSubmit"
               />
               <div class="composer__actions">
-                <label class="database-picker" title="选择数据源">
-                  <Database :size="17" />
-                  <span class="sr-only">选择数据源</span>
-                  <select v-model="databaseId" :disabled="loading" aria-label="选择数据源">
-                    <option v-for="database in databases" :key="database" :value="database">
-                      {{ database }}
-                    </option>
-                  </select>
-                </label>
-                <button
-                  class="composer__icon-button composer__mic"
-                type="button"
-                title="语音输入"
-                aria-label="语音输入"
-                :disabled="loading"
-                >
-                  <Mic :size="21" :stroke-width="1.8" />
-                </button>
                 <button
                   class="send-button"
                   type="submit"
@@ -344,23 +325,6 @@ async function scrollToBottom() {
             @keydown.enter.exact.prevent="handleSubmit"
           />
           <div class="composer__actions">
-            <label class="database-picker" title="选择数据源">
-              <Database :size="16" />
-              <span class="sr-only">选择数据源</span>
-              <select v-model="databaseId" :disabled="loading || messages.length > 0" aria-label="选择数据源">
-                <option v-for="database in databases" :key="database" :value="database">
-                  {{ database }}
-                </option>
-              </select>
-            </label>
-            <button
-              class="composer__icon-button composer__mic"
-              type="button"
-              title="语音输入"
-              aria-label="语音输入"
-            >
-              <Mic :size="20" :stroke-width="1.8" />
-            </button>
             <button
               class="send-button"
               type="submit"
@@ -856,11 +820,6 @@ async function scrollToBottom() {
   height: 42px;
   flex-basis: 42px;
 }
-.empty-composer .database-picker {
-  height: 42px;
-  padding-inline: 8px;
-  font-size: 14px;
-}
 .empty-composer .send-button {
   width: 48px;
   height: 48px;
@@ -877,28 +836,48 @@ async function scrollToBottom() {
 .composer__main {
   display: flex;
   min-height: 42px;
-  align-items: center;
+  align-items: flex-end;
   gap: 7px;
 }
 .composer textarea {
   display: block;
+  min-width: 0;
   width: 100%;
+  flex: 1 1 auto;
   min-height: 26px;
-  max-height: 130px;
+  max-height: 180px;
   border: 0;
   outline: 0;
   padding: 6px 2px;
+  box-sizing: border-box;
   resize: none;
   overflow-y: hidden;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  scrollbar-color: #b8b8b8 transparent;
+  scrollbar-width: thin;
   color: #242424;
   background: transparent;
   font: 21px/1.45 "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+}
+.composer textarea::-webkit-scrollbar {
+  width: 8px;
+}
+.composer textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+.composer textarea::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: #b8b8b8;
+  background-clip: padding-box;
 }
 .composer textarea::placeholder {
   color: #929292;
 }
 .composer__actions {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 2px;
 }
@@ -920,34 +899,6 @@ async function scrollToBottom() {
 .composer__icon-button:hover {
   color: #202123;
   background: #f1f1f1;
-}
-.composer__mic {
-  display: grid;
-}
-.database-picker {
-  display: inline-flex;
-  height: 34px;
-  align-items: center;
-  gap: 4px;
-  border: 0;
-  border-radius: 8px;
-  padding: 0 5px;
-  color: #777;
-  font-size: 12px;
-}
-.database-picker:hover {
-  background: #f5f5f5;
-  color: #333;
-}
-.database-picker select {
-  max-width: 78px;
-  min-width: 32px;
-  border: 0;
-  outline: 0;
-  color: inherit;
-  background: transparent;
-  font: inherit;
-  cursor: pointer;
 }
 .send-button {
   display: grid;
@@ -1032,11 +983,6 @@ async function scrollToBottom() {
     width: 38px;
     height: 38px;
     flex-basis: 38px;
-  }
-  .empty-composer .database-picker {
-    gap: 2px;
-    padding-inline: 4px;
-    font-size: 12px;
   }
   .empty-composer .send-button {
     width: 42px;
@@ -1123,9 +1069,6 @@ async function scrollToBottom() {
   }
   .composer {
     border-radius: 20px;
-  }
-  .database-picker select {
-    max-width: 50px;
   }
   .composer textarea {
     font-size: 18px;

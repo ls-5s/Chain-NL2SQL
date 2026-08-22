@@ -2,11 +2,12 @@
 
 基于 LangGraph 的链式自纠错 NL2SQL 项目，集成 Schema-RAG、SQL 安全治理和可复现实验评测。
 
-## 单账号会话部署
+## 多账号会话部署
 
 分析会话、执行过程、结果快照、上下文记忆和受控行引用都保存在服务端
-`CONVERSATION_DATABASE_PATH` 指定的 SQLite 数据库中，浏览器不保存消息内容。唯一账号由
-`APP_AUTH_USERNAME` 和 `APP_AUTH_PASSWORD` 配置，登录后使用 HttpOnly、SameSite Cookie。
+`CONVERSATION_DATABASE_PATH` 指定的 SQLite 数据库中，浏览器不保存消息内容。首次启动时由
+`APP_AUTH_USERNAME` 和 `APP_AUTH_PASSWORD` 初始化唯一超级管理员；管理员可在成员页添加、修改和删除普通成员。
+密码只保存为 scrypt 哈希，登录后使用 HttpOnly、SameSite Cookie。
 
 跨设备访问时，前端和 `/api` 必须经同一 HTTPS 域名的反向代理提供；不要将开发服务器或
 未加密 Cookie 暴露到公网。生产环境必须设置随机的 `APP_SESSION_SECRET` 与非默认密码。
