@@ -2,6 +2,7 @@
 
 from app.api import routes
 from app.config.settings import get_settings
+from app.db.registry import DatabaseRegistry
 from app.main import create_app
 
 
@@ -57,3 +58,57 @@ def test_conversation_runtime_failure_finishes_turn(monkeypatch, tmp_path) -> No
     detail = client.get(f"/api/v1/conversations/{conversation['id']}").json()
     assert detail["messages"][-1]["status"] == "failed"
     assert "sk-secret-value" not in detail["messages"][-1]["content"]
+
+
+def test_mysql_conversation_uses_registered_dialect(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CONVERSATION_DATABASE_PATH", str(tmp_path / "conversations.sqlite3"))
+    monkeypatch.setenv("APP_AUTH_USERNAME", "admin")
+    monkeypatch.setenv("APP_AUTH_PASSWORD", "123456")
+    get_settings.cache_clear()
+    routes._conversation_repositories.clear()
+
+    settings = get_settings()
+    registry = DatabaseRegistry(settings.conversation_database_path, settings)
+    record = registry.create(
+        name="External MySQL",
+        dialect="mysql",
+        config={
+            "host": "127.0.0.1",
+            "port": 3306,
+            "database": "demo",
+            "username": "readonly",
+            "credential_ref": "local/mysql",
+            "tls": True,
+        },
+    )
+    registry.set_table_access(record.id, "users", True)
+
+    captured: dict[str, object] = {}
+
+    class FakeGraph:
+        async def astream(self, state, stream_mode):
+            captured.update(state)
+            yield {"finalize": {"status": "succeeded", "final_answer": "ok"}}
+
+    class FakeDatabase:
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        routes,
+        "_create_graph_runtime",
+        lambda settings, context, database_id: (FakeGraph(), FakeDatabase(), "mysql"),
+    )
+
+    client = TestClient(create_app())
+    assert client.post("/api/v1/auth/login", json={"username": "admin", "password": "123456"}).status_code == 200
+    conversation = client.post("/api/v1/conversations", json={"database_id": "external-mysql"}).json()
+
+    response = client.post(
+        f"/api/v1/conversations/{conversation['id']}/query",
+        json={"question": "查询用户数量"},
+    )
+
+    assert response.status_code == 200
+    assert "event: complete" in response.text
+    assert captured["dialect"] == "mysql"

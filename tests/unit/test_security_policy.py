@@ -55,3 +55,12 @@ def test_rejects_unapproved_column(policy: AccessPolicy) -> None:
     result = validate_readonly_sql("SELECT email FROM orders", "sqlite", policy)
     assert not result.allowed
     assert result.reason == "column_not_allowed"
+
+
+def test_empty_table_allowlist_denies_all_tables() -> None:
+    policy = AccessPolicy(allowed_database_ids=frozenset({"mysql-db"}))
+
+    result = validate_readonly_sql("SELECT 1 FROM users", "mysql", policy)
+
+    assert not result.allowed
+    assert result.reason == "table_not_allowed"

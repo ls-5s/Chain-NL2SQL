@@ -93,6 +93,22 @@ def test_index_manager_filters_columns_and_persists(tmp_path: Path) -> None:
     assert second.documents[0].column_names == ["id", "name"]
 
 
+def test_index_manager_empty_table_allowlist_returns_no_documents(tmp_path: Path) -> None:
+    manager = SchemaIndexManager(retrieval_source, root=tmp_path, mode="bm25", top_k=5)
+
+    result = manager.retrieve(
+        SchemaRetrievalRequest(
+            question="查询用户数量",
+            database_id="demo",
+            dialect="sqlite",
+            allowed_tables=frozenset(),
+            allowed_columns={},
+        )
+    )
+
+    assert result.documents == []
+
+
 def test_hybrid_degrades_to_bm25_when_embedding_unavailable(tmp_path: Path) -> None:
     def unavailable_embedding():
         raise RuntimeError("embedding unavailable")
@@ -124,6 +140,115 @@ def test_bm25_aliases_retrieve_users_for_chinese_question(tmp_path: Path) -> Non
     )
     assert result.documents
     assert "users" in {document.table_name for document in result.documents}
+
+
+def test_bm25_miss_falls_back_to_all_authorized_schema(tmp_path: Path) -> None:
+    articles = SchemaDocument(
+        table_name="articles",
+        content="TABLE articles\nCOLUMNS id BIGINT, title VARCHAR\nPRIMARY KEY id\nFOREIGN KEYS none",
+        database_id="test",
+        column_names=["id", "title"],
+        dialect="mysql",
+    )
+    users = SchemaDocument(
+        table_name="users",
+        content="TABLE users\nCOLUMNS id BIGINT, username VARCHAR\nPRIMARY KEY id\nFOREIGN KEYS none",
+        database_id="test",
+        column_names=["id", "username"],
+        dialect="mysql",
+    )
+
+    def source(database_id: str) -> SchemaRetrieval:
+        assert database_id == "test"
+        return SchemaRetrieval(documents=[articles, users], schema_version="test-v1")
+
+    manager = SchemaIndexManager(source, root=tmp_path, mode="bm25", top_k=1)
+    result = manager.retrieve(
+        SchemaRetrievalRequest(
+            question="查询有哪些博客文章",
+            database_id="test",
+            dialect="mysql",
+            allowed_tables=frozenset({"articles", "users"}),
+            allowed_columns={},
+        )
+    )
+
+    assert result.retrieval_mode == "authorized_full_schema"
+    assert result.retrieval_scores == {}
+    assert [document.table_name for document in result.documents] == ["articles", "users"]
+
+
+def test_bm25_miss_fallback_never_includes_unauthorized_schema(tmp_path: Path) -> None:
+    authorized = documents()[0]
+    unauthorized = documents()[1]
+
+    def source(database_id: str) -> SchemaRetrieval:
+        return SchemaRetrieval(documents=[authorized, unauthorized], schema_version="v1")
+
+    manager = SchemaIndexManager(source, root=tmp_path, mode="bm25", top_k=5)
+    result = manager.retrieve(
+        SchemaRetrievalRequest(
+            question="查询博客文章",
+            database_id="demo",
+            dialect="sqlite",
+            allowed_tables=frozenset({"users"}),
+            allowed_columns={},
+        )
+    )
+
+    assert result.retrieval_mode == "authorized_full_schema"
+    assert [document.table_name for document in result.documents] == ["users"]
+
+
+def test_bm25_miss_continues_graph_with_authorized_schema(tmp_path: Path) -> None:
+    class Executor:
+        def inspect_schema(self, database_id: str) -> SchemaRetrieval:
+            return retrieval_source(database_id)
+
+        def get_schema_version(self, database_id: str) -> str:
+            return "v1"
+
+        def execute_readonly(self, *args, **kwargs) -> QueryResult:
+            return QueryResult(columns=["count"], rows=[[2]], row_count=1)
+
+    executor = Executor()
+    llm = FakeLLM([
+        '{"intent":"data_query","confidence":0.95,"reason":"查询本地文章数据"}',
+        "SELECT COUNT(*) FROM users",
+    ])
+    retriever = SchemaIndexManager(
+        retrieval_source,
+        root=tmp_path,
+        mode="bm25",
+        top_k=1,
+    )
+    graph = build_query_graph(
+        database_executor=executor,
+        llm_client=llm,
+        schema_retriever=retriever,
+        access_policy=AccessPolicy(
+            allowed_database_ids=frozenset({"demo"}),
+            allowed_tables=frozenset({"users", "orders"}),
+            allowed_columns={},
+        ),
+        query_timeout_seconds=5,
+    )
+
+    state = graph.invoke(
+        create_initial_state(
+            request_id="bm25-miss-graph",
+            question="查询有哪些博客文章",
+            database_id="demo",
+            dialect="sqlite",
+            max_iterations=1,
+        )
+    )
+
+    assert state["status"] == "succeeded"
+    assert state["retrieval_mode"] == "authorized_full_schema"
+    assert state["retrieved_tables"] == ["users", "orders"]
+    assert state["query_result"].rows == [[2]]
+    assert llm.prompts
 
 
 def test_schema_source_permission_error_is_controlled(tmp_path: Path) -> None:
@@ -174,6 +299,24 @@ def test_empty_retrieval_fails_closed_before_sql_generation() -> None:
     assert state["error_category"] == "schema_retrieval_error"
     assert "generated_sql" not in state
     assert not llm.prompts
+
+
+def test_sqlite_schema_retriever_empty_table_allowlist_returns_no_documents() -> None:
+    class SchemaOnlyExecutor:
+        def inspect_schema(self, database_id: str) -> SchemaRetrieval:
+            return retrieval_source(database_id)
+
+    result = SQLiteSchemaRetriever(SchemaOnlyExecutor()).retrieve(
+        SchemaRetrievalRequest(
+            question="查询用户数量",
+            database_id="demo",
+            dialect="sqlite",
+            allowed_tables=frozenset(),
+            allowed_columns={},
+        )
+    )
+
+    assert result.documents == []
 
 
 def test_schema_index_manager_reaches_sql_prompt_for_chinese_query(tmp_path: Path) -> None:

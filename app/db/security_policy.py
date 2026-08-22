@@ -141,11 +141,7 @@ def validate_readonly_sql(
             return SQLValidationResult(False, "system_table_not_allowed")
         alias = table.alias_or_name.lower()
         tables[alias] = table_name
-        if (
-            access_policy
-            and access_policy.allowed_tables
-            and table_name not in access_policy.allowed_tables
-        ):
+        if access_policy and table_name not in access_policy.allowed_tables:
             return SQLValidationResult(False, "table_not_allowed")
 
     if access_policy and access_policy.allowed_columns:

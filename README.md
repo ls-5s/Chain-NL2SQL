@@ -30,15 +30,15 @@ sqlite3 data/conversations.sqlite3 ".backup 'backups/conversations-YYYYMMDD.sqli
 
 | 状态 | 功能 | 当前情况 |
 | --- | --- | --- |
-| V | 环境配置 | 从 `.env` 读取服务、模型、超时、轮次和数据库白名单配置。 |
-| V | 启动配置校验 | 限制本机绑定地址，校验最大轮次、查询超时、结果行数和数据库白名单。 |
+| V | 环境配置 | 从 `.env` 读取服务、模型、超时和轮次配置。 |
+| V | 启动配置校验 | 限制本机绑定地址，校验最大轮次、查询超时和结果行数。 |
 | V | FastAPI 应用工厂 | 已创建应用并注册系统路由和业务路由。 |
 | V | 健康检查 | `GET /health` 返回服务状态和运行环境。 |
-| V | 数据库列表接口 | `GET /api/v1/databases` 仅返回服务端允许的数据库 ID。 |
+| V | 数据库列表接口 | `GET /api/v1/databases` 返回已登记且启用的数据库 ID。 |
 | V | 请求上下文 | 支持透传或生成 `X-Request-ID`，并加载本地访问策略。 |
 | V | 查询请求校验 | 校验问题、数据库 ID 和最大修复轮次的输入范围。 |
-| X | 查询接口 | `POST /api/v1/query` 仍固定返回 `501 Not Implemented`。 |
-| X | Graph 结果响应映射 | `map_query_state` 仍抛出 `NotImplementedError`。 |
+| V | 查询接口 | `POST /api/v1/query` 通过 SSE 返回 Agent 进度和最终 `complete` 结果。 |
+| V | Graph 结果响应映射 | `map_query_state` 将 Graph 状态映射为稳定的查询响应。 |
 | X | 生产鉴权与权限 | 尚未实现 API Key、RBAC、用户身份和调试 SQL 权限控制。 |
 
 ### 数据库与 SQL 安全
@@ -53,9 +53,9 @@ sqlite3 data/conversations.sqlite3 ".backup 'backups/conversations-YYYYMMDD.sqli
 | V | 表与字段白名单 | 支持按访问策略校验允许访问的表和字段。 |
 | V | 受限 SQL 执行 | 支持参数绑定、查询截止时间和 SQLite progress handler 中断。 |
 | V | 结果安全格式化 | 支持结果行数上限、截断标记和敏感字段掩码。 |
-| X | MySQL 适配器 | 文件仅为占位，尚未实现连接、Schema 读取和只读执行。 |
-| X | 多数据库适配器编排 | 尚未根据 `database_id` 构建和复用数据库适配器。 |
-| X | 经授权外部数据库连接 | 规划支持服务管理员预先登记的外部 MySQL 数据库；需实现数据库注册表、凭据引用、TLS、连接超时、Schema 读取和只读账号执行。客户端仅可提交已授权的 `database_id`，不得提交任意地址、连接串或密码。 |
+| V | MySQL 适配器 | 支持凭据引用、TLS、Schema 读取、只读执行、超时和安全结果格式化。 |
+| V | 多数据库适配器编排 | 根据已登记且启用的 `database_id` 构建 SQLite/MySQL 适配器。 |
+| V | 经授权外部数据库连接 | 管理员登记外部 MySQL 后显式开启表权限；客户端只能提交允许的 `database_id`。 |
 
 ### LLM 组件
 
@@ -141,10 +141,16 @@ data_query
 | V | 本地访问策略 | 已配置演示数据库、表、字段白名单和邮箱掩码。 |
 | V | 基础错误脱敏 | 可脱敏常见数据库连接 URL。 |
 | V | 日志入口 | 提供不自动添加 handler 的标准日志获取函数。 |
+| V | LangSmith 追踪 | 通过 `LANGSMITH_TRACING` 控制 LangGraph/ChatOpenAI 运行上报，`/health` 返回开关和项目名。 |
 | X | 错误分类器 | 文件为空壳，尚未映射模型和数据库异常。 |
 | X | Trace 记录 | 文件为空壳，尚未持久化或返回节点 Trace。 |
 | X | 指标聚合 | 文件为空壳，尚未统计延迟、轮次和修复成功率。 |
 | X | 用户安全错误响应 | 尚未完成 Graph 错误到 API 响应的白名单映射。 |
+
+LangSmith 线上追踪需要在部署环境设置 `LANGSMITH_TRACING=true`、
+`LANGSMITH_API_KEY` 和 `LANGSMITH_PROJECT`（可选 `LANGSMITH_ENDPOINT`），然后重启后端。
+访问 `/health` 确认 `langsmith_tracing` 为 `true`；`.env` 被 Git 忽略，不会随代码部署，
+线上平台必须单独配置这些变量。
 
 ### 前端
 
@@ -164,7 +170,7 @@ data_query
 
 | 状态 | 功能 | 当前情况 |
 | --- | --- | --- |
-| V | 后端单元测试 | 最近一次 `pytest` 运行共 26 项，全部通过。 |
+| V | 后端单元测试 | 最近一次 `pytest` 运行共 73 项，全部通过，包含 MySQL API、权限和会话方言回归测试。 |
 | V | SQLite Demo fixture | 已提供确定性 SQLite 初始化脚本和测试数据。 |
 | V | LLM Fake 测试 | 已使用可注入 Stub/Fake 覆盖模型客户端、Prompt 和重试逻辑。 |
 | X | 前端 Vitest 测试 | 当前配置未找到测试文件，`pnpm test` 退出失败。 |
@@ -174,8 +180,8 @@ data_query
 
 ### 当前可用范围
 
-- 可作为后端组件库验证：健康检查、数据库白名单、SQLite Schema 读取、受限只读 SQL 执行、LLM 客户端与 Prompt。
-- 不可作为完整 NL2SQL 服务使用：查询接口尚未编排 Graph，因此不会生成、修复或执行自然语言查询。
+- 可作为后端服务使用：登录后提交自然语言问题，Agent 会完成 Schema 检索、SQL 生成、安全校验、只读执行、修复和 SSE 结果返回。
+- MySQL 数据库必须先登记、通过连接测试，并为需要查询的表开启 Agent 权限；空权限集合会安全拒绝查询。
 - 前端默认启用 Mock API，适合查看知识库界面交互；将 `VITE_USE_MOCK_API=false` 后，除已实现的数据库列表外，其余业务接口尚未可用。
 
 ## 项目目标

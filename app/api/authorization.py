@@ -87,11 +87,12 @@ class AccessPolicy:
         )
 
 
-def local_access_policy(settings: Settings) -> AccessPolicy:
-    # P0 不接受客户端声明权限，只使用服务端环境变量中的白名单。
-    # P0 演示环境只开放四张业务表，并对用户邮箱进行脱敏。
+def local_access_policy(settings: Settings, database_ids: frozenset[str] | None = None) -> AccessPolicy:
+    # Database IDs are supplied by the server-side registry. The legacy
+    # settings field is intentionally ignored so new registrations are usable.
+    # The demo database keeps its established table, column, and masking rules.
     return AccessPolicy(
-        allowed_database_ids=settings.allowed_database_ids,
+        allowed_database_ids=database_ids or frozenset(),
         allowed_tables=frozenset({"users", "products", "orders", "order_items"}),
         allowed_columns={
             "users": frozenset({"id", "name", "email", "created_at"}),

@@ -142,14 +142,25 @@ class SchemaIndexManager:
                     [],
                     top_k=self.top_k,
                 )
-            ranked_documents = [item.document for item in ranked]
+            if ranked:
+                ranked_documents = [item.document for item in ranked]
+                retrieval_scores = {
+                    document.table_name: item.score for document, item in zip(ranked_documents, ranked)
+                }
+            else:
+                # A miss in the ranking indexes is different from an empty
+                # authorization scope. Keep the query useful for arbitrary
+                # business vocabulary while retaining the filtered documents.
+                mode = "authorized_full_schema"
+                ranked_documents = documents
+                retrieval_scores = {}
             if vector is not None:
                 vector.close()
             return SchemaRetrieval(
                 documents=ranked_documents,
                 schema_version=full.schema_version,
                 retrieval_mode=mode,
-                retrieval_scores={document.table_name: item.score for document, item in zip(ranked_documents, ranked)},
+                retrieval_scores=retrieval_scores,
             )
 
     def _ensure_index(
@@ -267,7 +278,8 @@ class SchemaIndexManager:
         for document in documents:
             if document.database_id != request.database_id:
                 continue
-            if allowed_tables and document.table_name.lower() not in allowed_tables:
+            # An empty allowlist is an explicit deny-all scope for registered databases.
+            if document.table_name.lower() not in allowed_tables:
                 continue
             table_columns = allowed_columns.get(document.table_name.lower())
             if document.table_name.lower() in allowed_columns:

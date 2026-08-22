@@ -198,7 +198,8 @@ def _filter_documents(documents, request: SchemaRetrievalRequest):
     visible = []
     for document in documents:
         table_key = document.table_name.lower()
-        if allowed_tables and table_key not in allowed_tables:
+        # An empty allowlist is an explicit deny-all scope for registered databases.
+        if table_key not in allowed_tables:
             continue
         if table_key in allowed_columns:
             columns = [column for column in document.column_names if column.lower() in allowed_columns[table_key]]

@@ -18,7 +18,6 @@ def make_settings(**overrides: object) -> Settings:
         "max_iterations": 3,
         "query_timeout_seconds": 15,
         "result_row_limit": 100,
-        "allowed_database_ids": frozenset({"demo"}),
         "openai_api_key": "test-key",
         "openai_base_url": "https://example.test/v1",
         "openai_model": "test-model",

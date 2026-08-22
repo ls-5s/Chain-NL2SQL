@@ -42,7 +42,7 @@ def get_request_context(request: Request) -> RequestContext:
             masked_columns_by_database={"demo": frozenset({"users.email"})},
         )
     else:
-        policy = local_access_policy(settings)
+        policy = local_access_policy(settings, database_ids=frozenset())
     return RequestContext(
         request_id=request_id,
         user_id=user_id,

@@ -66,7 +66,7 @@ class MySQLAdapter:
                 )
                 for name, columns in grouped.items()
             )
-            return build_schema_retrieval(self.database_id, tables)
+            return build_schema_retrieval(self.database_id, tables, dialect="mysql")
         except pymysql.MySQLError as error:
             raise DatabaseExecutionError("connection_error", "Unable to inspect the database schema.") from error
         finally:

@@ -20,8 +20,6 @@ def validate_settings(settings: Settings) -> None:
         raise ValueError("RESULT_ROW_LIMIT must be positive.")
     if not 0.0 < settings.intent_confidence_threshold <= 1.0:
         raise ValueError("INTENT_CONFIDENCE_THRESHOLD must be between 0 and 1.")
-    if not settings.allowed_database_ids:
-        raise ValueError("At least one database id must be configured.")
     if settings.schema_retrieval_mode not in {"vector", "bm25", "hybrid"}:
         raise ValueError("SCHEMA_RETRIEVAL_MODE must be vector, bm25, or hybrid.")
     if settings.schema_fallback_mode not in {"none", "bm25"}:
@@ -46,3 +44,12 @@ def validate_settings(settings: Settings) -> None:
         parsed = urlparse(settings.openai_base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("OPENAI_BASE_URL must be a valid HTTP or HTTPS URL.")
+    if settings.langsmith_tracing:
+        if not settings.langsmith_api_key:
+            raise ValueError("LANGSMITH_API_KEY must be configured when LANGSMITH_TRACING is enabled.")
+        if not settings.langsmith_project:
+            raise ValueError("LANGSMITH_PROJECT must be configured when LANGSMITH_TRACING is enabled.")
+        if settings.langsmith_endpoint:
+            parsed = urlparse(settings.langsmith_endpoint)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ValueError("LANGSMITH_ENDPOINT must be a valid HTTP or HTTPS URL.")

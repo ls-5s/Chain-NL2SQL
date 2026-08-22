@@ -112,7 +112,11 @@ def _finish_turn_safely(
 
 @system_router.get("/health", response_model=HealthResponse)
 def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
-    return HealthResponse(environment=settings.app_env)
+    return HealthResponse(
+        environment=settings.app_env,
+        langsmith_tracing=settings.langsmith_tracing,
+        langsmith_project=settings.langsmith_project,
+    )
 
 
 @api_router.get("/databases", response_model=DatabaseListResponse)
@@ -121,9 +125,10 @@ def list_databases(
     _: str = Depends(require_authenticated),
 ) -> DatabaseListResponse:
     registry = get_database_registry(settings)
-    records = registry.list(enabled_only=True)
+    records = registry.list()
+    enabled_records = [item for item in records if item.enabled]
     return DatabaseListResponse(
-        database_ids=[item.id for item in records],
+        database_ids=[item.id for item in enabled_records],
         databases=[_database_response(registry, item).model_dump(mode="json") for item in records],
     )
 
@@ -380,9 +385,14 @@ def list_conversations(context: RequestContext = Depends(get_request_context)) -
 def create_conversation(
     payload: ConversationCreateRequest, context: RequestContext = Depends(get_request_context)
 ) -> dict[str, Any]:
-    if payload.database_id not in context.access_policy.allowed_database_ids:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Database is not allowed.")
-    return _conversation_repository(get_settings()).create_conversation(context.user_id, payload.database_id)
+    database_id = payload.database_id
+    if database_id not in context.access_policy.allowed_database_ids:
+        active_database_ids = tuple(context.access_policy.allowed_database_ids)
+        if database_id == "demo" and len(active_database_ids) == 1:
+            database_id = active_database_ids[0]
+        else:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Database is not allowed.")
+    return _conversation_repository(get_settings()).create_conversation(context.user_id, database_id)
 
 
 @api_router.get("/conversations/{conversation_id}", response_model=ConversationDetail)
@@ -434,7 +444,7 @@ async def conversation_query(
         _log_agent_exception(error, request_id=context.request_id, conversation_id=conversation_id, node="build_context")
         raise HTTPException(status_code=502, detail=_GENERIC_AGENT_ERROR) from error
     try:
-        graph, database = _create_graph_runtime(settings, context, turn["database_id"])
+        graph, database, dialect = _create_graph_runtime(settings, context, turn["database_id"])
     except LLMConfigurationError as error:
         _log_agent_exception(error, request_id=context.request_id, conversation_id=conversation_id, turn_id=turn["turn_id"], node="create_graph_runtime")
         _finish_turn_safely(repository, turn, "LLM service is not configured.", request_id=context.request_id)
@@ -453,7 +463,7 @@ async def conversation_query(
             request_id=context.request_id,
             question=payload.question,
             database_id=turn["database_id"],
-            dialect="sqlite",
+            dialect=dialect,
             max_iterations=payload.max_iterations or settings.max_iterations,
             conversation_context=conversation_context,
             bound_parameters=bindings,
@@ -485,7 +495,7 @@ async def conversation_query(
 async def _stream_graph(
     graph: Any,
     state: NL2SQLState,
-    database: SQLiteAdapter,
+    database: Any,
     *,
     start_data: dict[str, Any] | None = None,
     on_progress: Callable[[dict[str, Any]], None] | None = None,
@@ -624,7 +634,7 @@ def _primary_key_columns(settings: Settings, database_id: str, table: str) -> tu
     return tuple(column.strip() for column in columns.split(",") if column.strip())
 
 
-def _create_graph_runtime(settings: Settings, context: RequestContext, database_id: str) -> tuple[Any, SQLiteAdapter]:
+def _create_graph_runtime(settings: Settings, context: RequestContext, database_id: str) -> tuple[Any, Any, str]:
     if database_id not in context.access_policy.allowed_database_ids:
         raise ValueError("Database is not allowed.")
     record = get_database_registry(settings).get(database_id)
@@ -652,11 +662,12 @@ def _create_graph_runtime(settings: Settings, context: RequestContext, database_
             embedding_factory=embedding_factory, reranker_factory=reranker_factory,
             embedding_model_name=settings.schema_embedding_model, reranker_model_name=settings.schema_reranker_model,
         )
-        return build_query_graph(
+        graph = build_query_graph(
             database_executor=database, llm_client=llm_client, schema_retriever=schema_retriever,
             access_policy=context.access_policy, query_timeout_seconds=settings.query_timeout_seconds,
             intent_confidence_threshold=settings.intent_confidence_threshold,
-        ), database
+        )
+        return graph, database, record.dialect
     except Exception:
         database.close()
         raise
@@ -688,6 +699,8 @@ def _node_explanation(node: str, state: dict[str, Any]) -> str:
         return "问题信息不足，将交由通用问答模型处理。"
     if node == "retrieve_schema":
         count = len(state.get("schema_context", []))
+        if state.get("retrieval_mode") == "authorized_full_schema":
+            return f"关键词检索未命中，已使用服务端允许访问的全部 Schema，共获得 {count} 张表的结构信息。"
         return f"读取服务端允许访问的 Schema，共获得 {count} 张表的结构信息。"
     if node == "generate_sql":
         return "根据用户问题和固定 Schema 生成单条只读 SQL。"

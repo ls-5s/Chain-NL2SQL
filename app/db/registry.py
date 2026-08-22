@@ -79,7 +79,7 @@ class DatabaseRegistry:
             existing = connection.execute(
                 "SELECT id FROM database_registry WHERE id = 'demo'"
             ).fetchone()
-            if existing is None and "demo" in self.settings.allowed_database_ids:
+            if existing is None:
                 now = _now()
                 connection.execute(
                     "INSERT INTO database_registry(id, name, dialect, config_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
@@ -97,6 +97,18 @@ class DatabaseRegistry:
                         "INSERT INTO database_table_permissions(database_id, table_name, agent_access, updated_at) VALUES ('demo', ?, 1, ?)",
                         (table, now),
                     )
+            self._normalize_enabled(connection)
+
+    @staticmethod
+    def _normalize_enabled(connection: sqlite3.Connection) -> None:
+        """Keep legacy registries with multiple enabled rows in a single-active state."""
+        rows = connection.execute(
+            "SELECT id FROM database_registry WHERE enabled = 1 ORDER BY updated_at DESC, id"
+        ).fetchall()
+        if len(rows) <= 1:
+            return
+        connection.execute("UPDATE database_registry SET enabled = 0 WHERE enabled = 1")
+        connection.execute("UPDATE database_registry SET enabled = 1 WHERE id = ?", (rows[0]["id"],))
 
     def list(self, *, enabled_only: bool = False) -> list[DatabaseRegistration]:
         with self._connection() as connection:
@@ -117,6 +129,7 @@ class DatabaseRegistry:
         with self._connection() as connection:
             if connection.execute("SELECT 1 FROM database_registry WHERE id = ?", (database_id,)).fetchone():
                 raise ValueError("数据库标识已存在，请更换名称。")
+            connection.execute("UPDATE database_registry SET enabled = 0 WHERE enabled = 1")
             connection.execute(
                 "INSERT INTO database_registry(id, name, dialect, config_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
                 (database_id, name.strip(), dialect, json.dumps(dict(config), ensure_ascii=False), now, now),
@@ -129,12 +142,24 @@ class DatabaseRegistry:
             raise KeyError(database_id)
         now = _now()
         with self._connection() as connection:
+            next_enabled = current.enabled if enabled is None else enabled
+            if enabled is False and current.enabled:
+                active_count = connection.execute(
+                    "SELECT COUNT(*) FROM database_registry WHERE enabled = 1"
+                ).fetchone()[0]
+                if active_count <= 1:
+                    raise ValueError("至少需要保留一个启用的数据库。")
+            if next_enabled:
+                connection.execute(
+                    "UPDATE database_registry SET enabled = 0, updated_at = ? WHERE id != ? AND enabled = 1",
+                    (now, database_id),
+                )
             connection.execute(
                 "UPDATE database_registry SET name = ?, config_json = ?, enabled = ?, updated_at = ? WHERE id = ?",
                 (
                     name.strip() if name else current.name,
                     json.dumps(dict(config), ensure_ascii=False) if config is not None else json.dumps(current.config, ensure_ascii=False),
-                    int(enabled) if enabled is not None else int(current.enabled),
+                    int(next_enabled),
                     now,
                     database_id,
                 ),

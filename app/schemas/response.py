@@ -29,6 +29,8 @@ class HealthResponse(BaseModel):
 
     status: str = "ok"
     environment: str
+    langsmith_tracing: bool = False
+    langsmith_project: str | None = None
 
 
 class DatabaseListResponse(BaseModel):
