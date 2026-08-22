@@ -2,12 +2,14 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import {
   KeyRound,
+  LockKeyhole,
   LoaderCircle,
   Pencil,
   Plus,
   ShieldCheck,
   Trash2,
   UserRound,
+  UsersRound,
   X,
 } from "lucide-vue-next";
 import {
@@ -125,15 +127,27 @@ onMounted(() => void loadMembers());
     </div>
 
     <section class="summary-row" aria-label="成员概览">
-      <div class="summary-item">
-        <strong>{{ members.length }}</strong
-        ><span>成员总数</span>
+      <div class="summary-item summary-item--members">
+        <span class="summary-icon"><UsersRound :size="17" /></span>
+        <div>
+          <strong>{{ members.length }}</strong>
+          <span>成员总数</span>
+        </div>
       </div>
-      <div class="summary-item">
-        <strong>{{ members.filter((member) => member.role === "super_admin").length }}</strong
-        ><span>超级管理员</span>
+      <div class="summary-item summary-item--admin">
+        <span class="summary-icon"><ShieldCheck :size="17" /></span>
+        <div>
+          <strong>{{ members.filter((member) => member.role === "super_admin").length }}</strong>
+          <span>超级管理员</span>
+        </div>
       </div>
-      <div class="summary-item"><strong>HttpOnly</strong><span>安全会话</span></div>
+      <div class="summary-item summary-item--secure">
+        <span class="summary-icon"><LockKeyhole :size="17" /></span>
+        <div>
+          <strong>HttpOnly</strong>
+          <span>安全会话</span>
+        </div>
+      </div>
     </section>
 
     <p v-if="errorMessage && !modalOpen" class="alert" role="alert">{{ errorMessage }}</p>
@@ -155,62 +169,58 @@ onMounted(() => void loadMembers());
       <div v-else-if="members.length === 0" class="empty-state">
         <UserRound :size="22" />暂无成员
       </div>
-      <div v-else class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>用户名</th>
-              <th>角色</th>
-              <th>密码</th>
-              <th>创建时间</th>
-              <th v-if="isAdmin" class="actions-heading">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="member in members" :key="member.id">
-              <td>
-                <span class="member-name"
-                  ><span class="avatar"><UserRound :size="15" /></span>{{ member.username }}</span
-                >
-              </td>
-              <td>
+      <div v-else class="member-cards">
+        <article v-for="member in members" :key="member.id" class="member-card">
+          <div class="member-card__header">
+            <div class="member-identity">
+              <span class="avatar"><UserRound :size="17" /></span>
+              <div>
+                <h3>{{ member.username }}</h3>
                 <span
                   :class="['role-badge', member.role === 'super_admin' ? 'role-badge--admin' : '']"
                   ><ShieldCheck v-if="member.role === 'super_admin'" :size="13" />{{
                     member.role === "super_admin" ? "超级管理员" : "普通成员"
                   }}</span
                 >
-              </td>
-              <td>
-                <span class="password-mask"><KeyRound :size="14" />••••••••</span>
-              </td>
-              <td class="date-cell">{{ formatDate(member.created_at) }}</td>
-              <td v-if="isAdmin" class="actions-cell">
-                <button
-                  v-if="member.role !== 'super_admin'"
-                  class="icon-button"
-                  type="button"
-                  aria-label="编辑成员"
-                  title="编辑成员"
-                  @click="openEdit(member)"
-                >
-                  <Pencil :size="16" />
-                </button>
-                <span v-else class="protected-label">受保护</span>
-                <button
-                  v-if="member.role !== 'super_admin'"
-                  class="icon-button icon-button--danger"
-                  type="button"
-                  aria-label="删除成员"
-                  title="删除成员"
-                  @click="removeMember(member)"
-                >
-                  <Trash2 :size="16" />
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+              </div>
+            </div>
+            <span v-if="isAdmin && member.role === 'super_admin'" class="protected-label"
+              >受保护</span
+            >
+          </div>
+
+          <div class="member-card__details">
+            <div class="member-detail">
+              <span class="detail-label">密码</span>
+              <span class="password-mask"><KeyRound :size="14" />••••••••</span>
+            </div>
+            <div class="member-detail">
+              <span class="detail-label">创建时间</span>
+              <span class="date-value">{{ formatDate(member.created_at) }}</span>
+            </div>
+          </div>
+
+          <div v-if="isAdmin && member.role !== 'super_admin'" class="member-card__actions">
+            <button
+              class="icon-button"
+              type="button"
+              aria-label="编辑成员"
+              title="编辑成员"
+              @click="openEdit(member)"
+            >
+              <Pencil :size="16" />
+            </button>
+            <button
+              class="icon-button icon-button--danger"
+              type="button"
+              aria-label="删除成员"
+              title="删除成员"
+              @click="removeMember(member)"
+            >
+              <Trash2 :size="16" />
+            </button>
+          </div>
+        </article>
       </div>
     </section>
 
@@ -279,10 +289,10 @@ onMounted(() => void loadMembers());
 
 <style scoped>
 .members-page {
-  min-height: 100vh;
-  padding: 28px clamp(24px, 5vw, 72px);
+  min-height: 100dvh;
+  padding: 24px clamp(20px, 4vw, 64px) 48px;
   color: #203027;
-  background: #f7f9f7;
+  background: #f4f7f5;
 }
 .members-toolbar,
 .surface-heading,
@@ -295,7 +305,8 @@ onMounted(() => void loadMembers());
 }
 .members-toolbar {
   justify-content: flex-end;
-  margin-bottom: 18px;
+  max-width: 1440px;
+  margin: 0 auto 14px;
 }
 .modal-eyebrow {
   display: flex;
@@ -322,7 +333,7 @@ h2 {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 40px;
+  min-height: 38px;
   border: 0;
   border-radius: 7px;
   padding: 0 15px;
@@ -333,6 +344,7 @@ h2 {
 .primary-button {
   color: #143322;
   background: #b7e7cb;
+  box-shadow: 0 5px 12px rgba(61, 142, 88, 0.12);
 }
 .primary-button:hover {
   background: #a6dbb9;
@@ -343,23 +355,52 @@ h2 {
   background: #fff;
 }
 .summary-row {
-  display: flex;
-  gap: 1px;
-  margin: 38px 0 20px;
-  border: 1px solid #e0e7e2;
-  background: #e0e7e2;
+  display: grid;
+  max-width: 1440px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 auto 18px;
 }
 .summary-item {
-  display: grid;
-  flex: 1;
-  gap: 5px;
-  padding: 18px 22px;
+  display: flex;
+  min-height: 78px;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #dfe8e1;
+  border-radius: 9px;
+  padding: 15px 18px;
   background: #fff;
+  box-shadow: 0 5px 14px rgba(33, 67, 47, 0.045);
+}
+.summary-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 8px;
+  color: #39805a;
+  background: #e8f4eb;
+}
+.summary-item--admin .summary-icon {
+  color: #8b7040;
+  background: #f7f0df;
+}
+.summary-item--secure .summary-icon {
+  color: #526f99;
+  background: #eaf0f8;
+}
+.summary-item > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
 }
 .summary-item strong {
-  font-size: 22px;
+  color: #24362b;
+  font-size: 20px;
+  line-height: 1.1;
 }
-.summary-item span {
+.summary-item > div > span {
   color: #7d8a82;
   font-size: 11px;
 }
@@ -374,12 +415,17 @@ h2 {
   font-size: 13px;
 }
 .members-surface {
+  max-width: 1440px;
+  margin: 0 auto;
   border: 1px solid #e0e7e2;
+  border-radius: 10px;
   background: #fff;
+  box-shadow: 0 8px 24px rgba(32, 64, 45, 0.045);
 }
 .surface-heading {
   align-items: center;
-  padding: 22px 24px;
+  min-height: 92px;
+  padding: 18px 22px;
   border-bottom: 1px solid #edf0ed;
 }
 .permission-note {
@@ -391,43 +437,68 @@ h2 {
   font-weight: 700;
   white-space: nowrap;
 }
-.table-wrap {
-  overflow-x: auto;
+.member-cards {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px 16px;
 }
-table {
-  width: 100%;
-  border-collapse: collapse;
-  text-align: left;
+.member-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(260px, 1fr) auto;
+  align-items: center;
+  gap: 20px;
+  min-height: 96px;
+  border: 1px solid #e0e7e2;
+  border-radius: 8px;
+  padding: 15px 18px;
+  background: #fbfdfb;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
 }
-th {
-  color: #87928b;
-  background: #fbfcfb;
-  font-size: 11px;
-  font-weight: 750;
+.member-card:hover {
+  border-color: #c8dbcd;
+  box-shadow: 0 6px 16px rgba(38, 74, 51, 0.07);
+  transform: translateY(-1px);
 }
-th,
-td {
-  padding: 16px 24px;
-  border-bottom: 1px solid #edf0ed;
-}
-td {
-  color: #39483f;
-  font-size: 13px;
-}
-tbody tr:last-child td {
-  border-bottom: 0;
-}
-.member-name,
+.member-card__header,
+.member-identity,
+.member-card__details,
+.member-detail,
+.member-card__actions,
 .password-mask,
 .role-badge {
   display: inline-flex;
   align-items: center;
   gap: 8px;
 }
+.member-card__header {
+  display: flex;
+  min-width: 0;
+  justify-content: space-between;
+  gap: 14px;
+}
+.member-identity {
+  min-width: 0;
+}
+.member-identity > div {
+  min-width: 0;
+}
+.member-identity h3 {
+  overflow: hidden;
+  margin: 0 0 8px;
+  color: #26382c;
+  font-size: 15px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .avatar {
   display: grid;
-  width: 29px;
-  height: 29px;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
   place-items: center;
   border-radius: 50%;
   color: #397453;
@@ -435,7 +506,7 @@ tbody tr:last-child td {
 }
 .role-badge {
   border-radius: 999px;
-  padding: 6px 9px;
+  padding: 5px 8px;
   color: #657269;
   background: #f2f4f2;
   font-size: 11px;
@@ -451,15 +522,26 @@ tbody tr:last-child td {
 .password-mask svg {
   letter-spacing: 0;
 }
-.date-cell {
+.member-card__details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.member-detail {
+  display: grid;
+  align-items: start;
+  gap: 7px;
+}
+.detail-label {
+  color: #8a968e;
+  font-size: 11px;
+}
+.date-value {
   color: #78847d;
+  font-size: 13px;
 }
-.actions-heading,
-.actions-cell {
-  text-align: right;
-}
-.actions-cell {
-  white-space: nowrap;
+.member-card__actions {
+  justify-content: flex-end;
 }
 .icon-button,
 .close-button {
@@ -483,9 +565,9 @@ tbody tr:last-child td {
   background: #fff0f0;
 }
 .protected-label {
-  margin-right: 8px;
   color: #9aa49e;
   font-size: 11px;
+  white-space: nowrap;
 }
 .empty-state {
   display: flex;
@@ -511,13 +593,14 @@ tbody tr:last-child td {
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(22, 37, 29, 0.35);
+  background: rgba(22, 37, 29, 0.28);
+  backdrop-filter: blur(2px);
 }
 .modal {
   width: min(100%, 440px);
   border: 1px solid #dfe7e1;
-  border-radius: 9px;
-  padding: 24px;
+  border-radius: 12px;
+  padding: 22px;
   background: #fff;
   box-shadow: 0 24px 70px rgba(22, 37, 29, 0.22);
 }
@@ -567,11 +650,12 @@ tbody tr:last-child td {
 }
 @media (max-width: 640px) {
   .members-page {
-    padding: 20px 16px;
+    padding: 16px 12px 32px;
   }
   .summary-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
+    gap: 8px;
   }
   .summary-item:last-child {
     grid-column: 1 / -1;
@@ -579,11 +663,31 @@ tbody tr:last-child td {
   .surface-heading {
     display: grid;
     gap: 14px;
-    padding: 18px;
+    min-height: 0;
+    padding: 16px;
   }
-  th,
-  td {
-    padding: 13px 14px;
+  .member-cards {
+    padding: 10px;
+  }
+  .member-card {
+    grid-template-columns: 1fr auto;
+    gap: 18px;
+    padding: 15px;
+  }
+  .member-card__details {
+    grid-column: 1 / -1;
+    gap: 14px;
+  }
+  .member-card__actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
+
+@media (min-width: 641px) and (max-width: 980px) {
+  .member-card {
+    grid-template-columns: minmax(0, 1fr) minmax(220px, 0.9fr) auto;
+    gap: 14px;
   }
 }
 </style>

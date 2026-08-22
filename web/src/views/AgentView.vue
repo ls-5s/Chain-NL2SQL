@@ -555,8 +555,8 @@ async function scrollToBottom() {
   overflow-x: auto;
   border-radius: 7px;
   padding: 12px 14px;
-  color: #e9edf0;
-  background: #282c34;
+  color: #303030;
+  background: #f4f4f4;
   white-space: pre;
 }
 .message-markdown :deep(pre code) {
@@ -603,8 +603,8 @@ async function scrollToBottom() {
 }
 .reasoning-timeline {
   width: min(100%, 676px);
-  margin-top: 0;
-  padding: 18px 18px 16px;
+  margin-top: 10px;
+  padding: 6px 0 2px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -615,10 +615,11 @@ async function scrollToBottom() {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 14px;
-  color: #777777;
-  font-size: 21px;
-  font-weight: 700;
+  margin-bottom: 10px;
+  color: #777;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.4;
   cursor: pointer;
   list-style: none;
 }
@@ -639,16 +640,16 @@ async function scrollToBottom() {
   transform: rotate(180deg);
 }
 .reasoning-timeline:not([open]) {
-  padding-bottom: 18px;
+  padding-bottom: 2px;
 }
 .reasoning-timeline:not([open]) .reasoning-timeline__title {
   margin-bottom: 0;
 }
 .reasoning-step {
   display: flex;
-  gap: 11px;
+  gap: 9px;
   position: relative;
-  padding-bottom: 14px;
+  padding-bottom: 10px;
 }
 .reasoning-step:last-child {
   padding-bottom: 0;
@@ -656,20 +657,20 @@ async function scrollToBottom() {
 .reasoning-step:not(:last-child)::before {
   content: "";
   position: absolute;
-  top: 11px;
+  top: 9px;
   bottom: 0;
-  left: 4px;
+  left: 3px;
   width: 1px;
-  background: #e8e8e8;
+  background: #e5e5e5;
 }
 .reasoning-step__dot {
   z-index: 1;
-  width: 8px;
-  height: 8px;
-  margin-top: 6px;
-  flex: 0 0 8px;
+  width: 6px;
+  height: 6px;
+  margin-top: 5px;
+  flex: 0 0 6px;
   border-radius: 50%;
-  background: #b7b7b7;
+  background: #b8b8b8;
 }
 .reasoning-step__body {
   min-width: 0;
@@ -680,26 +681,27 @@ async function scrollToBottom() {
   display: block;
 }
 .reasoning-step strong {
-  color: #686868;
-  font-size: 21px;
+  color: #5f5f5f;
+  font-size: 15px;
   font-weight: 650;
+  line-height: 1.45;
 }
 .reasoning-step small {
-  margin-top: 4px;
-  color: #a0a0a0;
-  font-size: 15px;
-  line-height: 1.55;
+  margin-top: 2px;
+  color: #9a9a9a;
+  font-size: 12px;
+  line-height: 1.5;
 }
 .reasoning-step code {
-  overflow: auto;
+  overflow-x: auto;
   max-width: 100%;
-  margin-top: 6px;
-  padding: 6px 8px;
-  border-radius: 6px;
+  margin-top: 5px;
+  padding: 5px 7px;
+  border-radius: 5px;
   color: #3f3f3f;
-  background: #f0f0f0;
+  background: #f3f3f3;
   font:
-    11px/1.5 ui-monospace,
+    10.5px/1.45 ui-monospace,
     SFMono-Regular,
     Consolas,
     monospace;
@@ -836,7 +838,7 @@ async function scrollToBottom() {
 .composer__main {
   display: flex;
   min-height: 42px;
-  align-items: flex-end;
+  align-items: center;
   gap: 7px;
 }
 .composer textarea {
@@ -1031,36 +1033,36 @@ async function scrollToBottom() {
   }
   .reasoning-timeline {
     width: auto;
-    margin-top: 14px;
-    padding: 12px 13px;
+    margin-top: 8px;
+    padding: 5px 0 2px;
     border: 0;
     border-radius: 0;
     background: transparent;
   }
   .reasoning-timeline__title {
-    margin-bottom: 11px;
-    font-size: 18px;
+    margin-bottom: 8px;
+    font-size: 13px;
   }
   .reasoning-step {
-    gap: 9px;
-    padding-bottom: 12px;
+    gap: 8px;
+    padding-bottom: 9px;
   }
   .reasoning-step:not(:last-child)::before {
-    top: 10px;
-    left: 3px;
+    top: 8px;
+    left: 2.5px;
   }
   .reasoning-step__dot {
-    width: 7px;
-    height: 7px;
+    width: 5px;
+    height: 5px;
     margin-top: 5px;
-    flex-basis: 7px;
+    flex-basis: 5px;
   }
   .reasoning-step strong {
-    font-size: 18px;
+    font-size: 14px;
   }
   .reasoning-step small {
     margin-top: 2px;
-    font-size: 13px;
+    font-size: 11px;
     line-height: 1.5;
   }
   .composer-wrap {
