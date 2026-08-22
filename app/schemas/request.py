@@ -41,3 +41,19 @@ class ConversationQueryRequest(BaseModel):
 class ResultReferenceRequest(BaseModel):
     turn_id: str = Field(min_length=1, max_length=64)
     row_index: int = Field(ge=0, le=99)
+
+
+class DatabaseCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    dialect: str = Field(pattern="^(sqlite|mysql)$")
+    config: dict[str, object] = Field(default_factory=dict)
+
+
+class DatabaseUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    config: dict[str, object] | None = None
+    enabled: bool | None = None
+
+
+class DatabaseTableAccessRequest(BaseModel):
+    agent_access: bool

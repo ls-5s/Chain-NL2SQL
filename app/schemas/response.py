@@ -35,6 +35,24 @@ class DatabaseListResponse(BaseModel):
     """服务端允许暴露给当前环境的数据库标识列表。"""
 
     database_ids: list[str]
+    databases: list[dict[str, object]] = Field(default_factory=list)
+
+
+class DatabaseTableResponse(BaseModel):
+    table_name: str
+    agent_access: bool
+    updated_at: str
+
+
+class DatabaseResponse(BaseModel):
+    id: str
+    name: str
+    dialect: str
+    enabled: bool
+    config: dict[str, object] = Field(default_factory=dict)
+    tables: list[DatabaseTableResponse] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
 
 
 class SessionResponse(BaseModel):

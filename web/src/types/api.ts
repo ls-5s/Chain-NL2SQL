@@ -124,6 +124,38 @@ export interface QueryStreamEvent {
 
 export interface DatabaseListResponse {
   database_ids: string[];
+  databases?: Database[];
+}
+
+export type DatabaseDialect = "sqlite" | "mysql";
+
+export interface DatabaseTable {
+  table_name: string;
+  agent_access: boolean;
+  updated_at: string;
+}
+
+export interface Database {
+  id: string;
+  name: string;
+  dialect: DatabaseDialect;
+  enabled: boolean;
+  config: Record<string, unknown>;
+  tables: DatabaseTable[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DatabaseCreateRequest {
+  name: string;
+  dialect: DatabaseDialect;
+  config: Record<string, unknown>;
+}
+
+export interface DatabaseUpdateRequest {
+  name?: string;
+  config?: Record<string, unknown>;
+  enabled?: boolean;
 }
 
 export interface ConversationSummary {

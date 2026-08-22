@@ -4,6 +4,10 @@ import type {
   ApprovalItem,
   ApprovalStatus,
   DatabaseListResponse,
+  Database,
+  DatabaseCreateRequest,
+  DatabaseTable,
+  DatabaseUpdateRequest,
   KnowledgeDocument,
   QueryRequest,
   QueryResponse,
@@ -44,6 +48,75 @@ export async function fetchDatabases(): Promise<string[]> {
   try {
     const { data } = await client.get<DatabaseListResponse>("/databases");
     return data.database_ids;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+export async function fetchDatabaseConfigs(): Promise<Database[]> {
+  try {
+    const { data } = await client.get<DatabaseListResponse>("/databases");
+    return data.databases || data.database_ids.map((id) => ({
+      id,
+      name: id,
+      dialect: "sqlite",
+      enabled: true,
+      config: {},
+      tables: [],
+      created_at: "",
+      updated_at: "",
+    }));
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+export async function createDatabase(payload: DatabaseCreateRequest): Promise<Database> {
+  try {
+    const { data } = await client.post<Database>("/databases", payload);
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+export async function updateDatabase(id: string, payload: DatabaseUpdateRequest): Promise<Database> {
+  try {
+    const { data } = await client.patch<Database>(`/databases/${id}`, payload);
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+export async function deleteDatabase(id: string): Promise<void> {
+  try {
+    await client.delete(`/databases/${id}`);
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+export async function testDatabase(id: string): Promise<Database> {
+  try {
+    const { data } = await client.post<Database>(`/databases/${id}/test`);
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+export async function updateDatabaseTableAccess(
+  databaseId: string,
+  tableName: string,
+  agentAccess: boolean,
+): Promise<DatabaseTable> {
+  try {
+    const { data } = await client.patch<DatabaseTable>(
+      `/databases/${databaseId}/tables/${encodeURIComponent(tableName)}`,
+      { agent_access: agentAccess },
+    );
+    return data;
   } catch (error) {
     throw toApiError(error);
   }

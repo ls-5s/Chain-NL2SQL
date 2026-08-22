@@ -439,15 +439,18 @@ h2 {
 }
 .member-cards {
   display: grid;
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 280px));
+  justify-content: start;
+  gap: 14px;
   padding: 14px 16px 16px;
 }
 .member-card {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(260px, 1fr) auto;
-  align-items: center;
-  gap: 20px;
-  min-height: 96px;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  grid-template-rows: auto 1fr auto;
+  align-items: stretch;
+  gap: 18px;
   border: 1px solid #e0e7e2;
   border-radius: 8px;
   padding: 15px 18px;
@@ -524,8 +527,9 @@ h2 {
 }
 .member-card__details {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
+  align-content: center;
+  grid-template-columns: 1fr;
+  gap: 16px;
 }
 .member-detail {
   display: grid;
@@ -542,6 +546,7 @@ h2 {
 }
 .member-card__actions {
   justify-content: flex-end;
+  min-height: 32px;
 }
 .icon-button,
 .close-button {
@@ -667,27 +672,19 @@ h2 {
     padding: 16px;
   }
   .member-cards {
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
     padding: 10px;
   }
   .member-card {
-    grid-template-columns: 1fr auto;
-    gap: 18px;
+    max-width: none;
+    gap: 14px;
     padding: 15px;
   }
   .member-card__details {
-    grid-column: 1 / -1;
-    gap: 14px;
+    gap: 12px;
   }
   .member-card__actions {
-    grid-column: 2;
-    grid-row: 1;
-  }
-}
-
-@media (min-width: 641px) and (max-width: 980px) {
-  .member-card {
-    grid-template-columns: minmax(0, 1fr) minmax(220px, 0.9fr) auto;
-    gap: 14px;
+    justify-content: flex-start;
   }
 }
 </style>

@@ -10,8 +10,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
-from app.api.auth import require_authenticated
-from app.api.dependencies import RequestContext, get_request_context
+from app.api.auth import require_authenticated, require_super_admin
+from app.api.dependencies import RequestContext, get_database_registry, get_request_context
 from app.api.response_mapper import map_query_state
 from app.config.settings import Settings, get_settings
 from app.conversations.repository import ConversationNotFoundError, ConversationRepository, InvalidResultReferenceError
@@ -22,11 +22,21 @@ from app.llm.factory import LLMConfigurationError, create_openai_client
 from app.rag.index_manager import SchemaIndexManager
 from app.rag.reranker import SentenceTransformerReranker
 from app.rag.vector_store import SentenceTransformerEmbedding
-from app.schemas.request import ConversationCreateRequest, ConversationQueryRequest, QueryRequest, ResultReferenceRequest
+from app.schemas.request import (
+    ConversationCreateRequest,
+    ConversationQueryRequest,
+    DatabaseCreateRequest,
+    DatabaseTableAccessRequest,
+    DatabaseUpdateRequest,
+    QueryRequest,
+    ResultReferenceRequest,
+)
 from app.schemas.response import (
     ConversationDetail,
     ConversationSummary,
+    DatabaseResponse,
     DatabaseListResponse,
+    DatabaseTableResponse,
     HealthResponse,
     ResultReferenceResponse,
 )
@@ -105,8 +115,172 @@ def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
 
 
 @api_router.get("/databases", response_model=DatabaseListResponse)
-def list_databases(settings: Settings = Depends(get_settings), _: str = Depends(require_authenticated)) -> DatabaseListResponse:
-    return DatabaseListResponse(database_ids=sorted(settings.allowed_database_ids))
+def list_databases(
+    settings: Settings = Depends(get_settings),
+    _: str = Depends(require_authenticated),
+) -> DatabaseListResponse:
+    registry = get_database_registry(settings)
+    records = registry.list(enabled_only=True)
+    return DatabaseListResponse(
+        database_ids=[item.id for item in records],
+        databases=[_database_response(registry, item) for item in records],
+    )
+
+
+@api_router.post("/databases", response_model=DatabaseResponse, status_code=status.HTTP_201_CREATED)
+def create_database(
+    payload: DatabaseCreateRequest,
+    settings: Settings = Depends(get_settings),
+    _: dict[str, Any] = Depends(require_super_admin),
+) -> DatabaseResponse:
+    try:
+        record = get_database_registry(settings).create(
+            name=payload.name,
+            dialect=payload.dialect,
+            config=_validated_database_config(payload.dialect, payload.config),
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
+    return _database_response(get_database_registry(settings), record)
+
+
+@api_router.patch("/databases/{database_id}", response_model=DatabaseResponse)
+def update_database(
+    database_id: str,
+    payload: DatabaseUpdateRequest,
+    settings: Settings = Depends(get_settings),
+    _: dict[str, Any] = Depends(require_super_admin),
+) -> DatabaseResponse:
+    registry = get_database_registry(settings)
+    current = registry.get(database_id)
+    if current is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="数据库不存在。")
+    try:
+        record = registry.update(
+            database_id,
+            name=payload.name,
+            config=_validated_database_config(current.dialect, payload.config) if payload.config is not None else None,
+            enabled=payload.enabled,
+        )
+    except KeyError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="数据库不存在。") from error
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
+    return _database_response(registry, record)
+
+
+@api_router.delete("/databases/{database_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_database(
+    database_id: str,
+    settings: Settings = Depends(get_settings),
+    _: dict[str, Any] = Depends(require_super_admin),
+) -> None:
+    registry = get_database_registry(settings)
+    if registry.get(database_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="数据库不存在。")
+    if database_id == "demo":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="演示数据库不能删除。")
+    registry.delete(database_id)
+
+
+@api_router.post("/databases/{database_id}/test", response_model=DatabaseResponse)
+def test_database(
+    database_id: str,
+    settings: Settings = Depends(get_settings),
+    _: dict[str, Any] = Depends(require_super_admin),
+) -> DatabaseResponse:
+    registry = get_database_registry(settings)
+    record = registry.get(database_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="数据库不存在。")
+    try:
+        adapter = _adapter_for_registration(record, settings)
+        schema = adapter.inspect_schema(record.id)
+        registry.sync_tables(record.id, [document.table_name for document in schema.documents])
+        adapter.close()
+    except NotImplementedError as error:
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="数据库连接或 Schema 读取失败。") from error
+    return _database_response(registry, record)
+
+
+@api_router.get("/databases/{database_id}/tables", response_model=list[DatabaseTableResponse])
+def list_database_tables(
+    database_id: str,
+    settings: Settings = Depends(get_settings),
+    _: str = Depends(require_authenticated),
+) -> list[dict[str, Any]]:
+    registry = get_database_registry(settings)
+    if registry.get(database_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="数据库不存在。")
+    return registry.table_permissions(database_id)
+
+
+@api_router.patch("/databases/{database_id}/tables/{table_name}", response_model=DatabaseTableResponse)
+def update_database_table_access(
+    database_id: str,
+    table_name: str,
+    payload: DatabaseTableAccessRequest,
+    settings: Settings = Depends(get_settings),
+    _: dict[str, Any] = Depends(require_super_admin),
+) -> dict[str, Any]:
+    registry = get_database_registry(settings)
+    if registry.get(database_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="数据库不存在。")
+    known = {item["table_name"].lower() for item in registry.table_permissions(database_id)}
+    if table_name.lower() not in known:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="数据表不存在，请先测试连接。")
+    actual_name = next(item["table_name"] for item in registry.table_permissions(database_id) if item["table_name"].lower() == table_name.lower())
+    registry.set_table_access(database_id, actual_name, payload.agent_access)
+    return next(item for item in registry.table_permissions(database_id) if item["table_name"] == actual_name)
+
+
+def _safe_config(config: dict[str, Any]) -> dict[str, Any]:
+    # Never echo a credential value through an admin API response.
+    return {
+        key: value
+        for key, value in config.items()
+        if key.lower() not in {"password", "secret", "credential", "credential_value"}
+    }
+
+
+def _database_response(registry, record) -> DatabaseResponse:
+    return DatabaseResponse(
+        id=record.id,
+        name=record.name,
+        dialect=record.dialect,
+        enabled=record.enabled,
+        config=_safe_config(record.config),
+        tables=registry.table_permissions(record.id),
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+
+def _validated_database_config(dialect: str, config: dict[str, object]) -> dict[str, object]:
+    if dialect == "sqlite":
+        path = config.get("path")
+        if not isinstance(path, str) or not path.strip():
+            raise ValueError("SQLite 数据库必须提供文件路径。")
+        return {"path": path.strip()}
+    required = ("host", "port", "database", "username", "credential_ref")
+    missing = [key for key in required if not config.get(key)]
+    if missing:
+        raise ValueError(f"MySQL 配置缺少字段：{', '.join(missing)}。")
+    try:
+        port = int(config["port"])
+    except (TypeError, ValueError) as error:
+        raise ValueError("MySQL 端口必须是数字。") from error
+    if not 1 <= port <= 65535:
+        raise ValueError("MySQL 端口范围无效。")
+    return {**config, "port": port, "tls": bool(config.get("tls", True))}
+
+
+def _adapter_for_registration(record, settings: Settings):
+    if record.dialect == "sqlite":
+        return SQLiteAdapter(record.id, str(record.config["path"]), settings.result_row_limit)
+    raise NotImplementedError("MySQL 适配器尚未启用，请先配置服务端 MySQL 连接实现。")
 
 
 @api_router.post("/query")
@@ -117,10 +291,13 @@ async def query(
     settings = get_settings()
     if payload.database_id not in context.access_policy.allowed_database_ids:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Database is not allowed.")
-    if payload.database_id != "demo":
+    record = get_database_registry(settings).get(payload.database_id)
+    if record is None or not record.enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Database adapter is not configured.")
-
-    database = SQLiteAdapter(payload.database_id, settings.demo_database_path, settings.result_row_limit)
+    try:
+        database = _adapter_for_registration(record, settings)
+    except NotImplementedError as error:
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(error)) from error
     try:
         llm_client = create_openai_client(settings)
         def embedding_factory() -> SentenceTransformerEmbedding:
@@ -171,7 +348,7 @@ async def query(
         request_id=context.request_id,
         question=payload.question,
         database_id=payload.database_id,
-        dialect="sqlite",
+        dialect=record.dialect,
         max_iterations=payload.max_iterations or settings.max_iterations,
     )
     return StreamingResponse(
@@ -420,9 +597,13 @@ def _embedding_provider(settings: Settings) -> SentenceTransformerEmbedding:
 
 
 def _primary_key_columns(settings: Settings, database_id: str, table: str) -> tuple[str, ...]:
-    if database_id != "demo":
+    record = get_database_registry(settings).get(database_id)
+    if record is None:
         return ()
-    adapter = SQLiteAdapter(database_id, settings.demo_database_path, settings.result_row_limit)
+    try:
+        adapter = _adapter_for_registration(record, settings)
+    except NotImplementedError:
+        return ()
     schema = adapter.inspect_schema(database_id)
     document = next((item for item in schema.documents if item.table_name.lower() == table.lower()), None)
     if document is None:
@@ -437,9 +618,10 @@ def _primary_key_columns(settings: Settings, database_id: str, table: str) -> tu
 def _create_graph_runtime(settings: Settings, context: RequestContext, database_id: str) -> tuple[Any, SQLiteAdapter]:
     if database_id not in context.access_policy.allowed_database_ids:
         raise ValueError("Database is not allowed.")
-    if database_id != "demo":
+    record = get_database_registry(settings).get(database_id)
+    if record is None or not record.enabled:
         raise ValueError("Database adapter is not configured.")
-    database = SQLiteAdapter(database_id, settings.demo_database_path, settings.result_row_limit)
+    database = _adapter_for_registration(record, settings)
     try:
         llm_client = create_openai_client(settings)
 

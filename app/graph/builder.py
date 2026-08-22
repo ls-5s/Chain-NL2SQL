@@ -94,12 +94,13 @@ def _route_after_execution(state: NL2SQLState) -> str:
 
 def _retrieve_schema_node(retriever: SchemaRetriever, access_policy: AccessPolicy):
     def retrieve(state: NL2SQLState) -> dict[str, object]:
+        database_policy = access_policy.for_database(state["database_id"])
         request = SchemaRetrievalRequest(
             question=state["question"],
             database_id=state["database_id"],
             dialect=state["dialect"],
-            allowed_tables=access_policy.allowed_tables,
-            allowed_columns=access_policy.allowed_columns or {},
+            allowed_tables=database_policy.allowed_tables,
+            allowed_columns=database_policy.allowed_columns or {},
         )
         try:
             retrieval = retriever.retrieve(request)

@@ -30,7 +30,10 @@ def make_execution_node(database_executor: DatabaseExecutor, access_policy: Acce
                     }
         try:
             result = database_executor.execute_readonly(
-                sql, time.monotonic() + timeout_seconds, access_policy, state.get("bound_parameters", {})
+                sql,
+                time.monotonic() + timeout_seconds,
+                access_policy.for_database(state["database_id"]),
+                state.get("bound_parameters", {}),
             )
         except DatabaseExecutionError as error:
             return {"status": "failed", "error_category": error.category, "safe_error": error.safe_message}
