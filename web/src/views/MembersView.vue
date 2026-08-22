@@ -2,14 +2,12 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import {
   KeyRound,
-  LockKeyhole,
   LoaderCircle,
   Pencil,
   Plus,
   ShieldCheck,
   Trash2,
   UserRound,
-  UsersRound,
   X,
 } from "lucide-vue-next";
 import {
@@ -20,6 +18,7 @@ import {
   updateMember,
 } from "@/api/client";
 import { getDemoRole } from "@/auth/auth";
+import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import type { Member } from "@/types/api";
 
 const members = ref<Member[]>([]);
@@ -27,6 +26,8 @@ const loading = ref(true);
 const saving = ref(false);
 const errorMessage = ref("");
 const modalOpen = ref(false);
+const deleteTarget = ref<Member | null>(null);
+const deleting = ref(false);
 const editingMember = ref<Member | null>(null);
 const role = getDemoRole();
 const isAdmin = computed(() => role === "super_admin");
@@ -100,14 +101,28 @@ async function saveMember() {
   }
 }
 
-async function removeMember(member: Member) {
-  if (!window.confirm(`确定删除成员“${member.username}”吗？`)) return;
+function openDelete(member: Member) {
+  deleteTarget.value = member;
+  errorMessage.value = "";
+}
+
+function closeDeleteModal() {
+  if (!deleting.value) deleteTarget.value = null;
+}
+
+async function removeMember() {
+  const member = deleteTarget.value;
+  if (!member || deleting.value) return;
+  deleting.value = true;
   errorMessage.value = "";
   try {
     await deleteMember(member.id);
     members.value = members.value.filter((item) => item.id !== member.id);
+    deleteTarget.value = null;
   } catch (error) {
     errorMessage.value = error instanceof ApiRequestError ? error.message : "删除成员失败。";
+  } finally {
+    deleting.value = false;
   }
 }
 
@@ -120,37 +135,9 @@ onMounted(() => void loadMembers());
 
 <template>
   <main class="members-page">
-    <div class="members-toolbar">
-      <button v-if="isAdmin" class="primary-button" type="button" @click="openCreate">
-        <Plus :size="17" /> 添加成员
-      </button>
-    </div>
-
-    <section class="summary-row" aria-label="成员概览">
-      <div class="summary-item summary-item--members">
-        <span class="summary-icon"><UsersRound :size="17" /></span>
-        <div>
-          <strong>{{ members.length }}</strong>
-          <span>成员总数</span>
-        </div>
-      </div>
-      <div class="summary-item summary-item--admin">
-        <span class="summary-icon"><ShieldCheck :size="17" /></span>
-        <div>
-          <strong>{{ members.filter((member) => member.role === "super_admin").length }}</strong>
-          <span>超级管理员</span>
-        </div>
-      </div>
-      <div class="summary-item summary-item--secure">
-        <span class="summary-icon"><LockKeyhole :size="17" /></span>
-        <div>
-          <strong>HttpOnly</strong>
-          <span>安全会话</span>
-        </div>
-      </div>
-    </section>
-
-    <p v-if="errorMessage && !modalOpen" class="alert" role="alert">{{ errorMessage }}</p>
+    <p v-if="errorMessage && !modalOpen && !deleteTarget" class="alert" role="alert">
+      {{ errorMessage }}
+    </p>
 
     <section class="members-surface" aria-labelledby="members-title">
       <div class="surface-heading">
@@ -158,9 +145,14 @@ onMounted(() => void loadMembers());
           <h2 id="members-title">账号列表</h2>
           <p>密码仅保存为安全哈希，页面不会显示明文密码。</p>
         </div>
-        <span class="permission-note"
-          ><ShieldCheck :size="15" /> {{ isAdmin ? "管理员权限" : "只读权限" }}</span
-        >
+        <div class="surface-actions">
+          <button v-if="isAdmin" class="primary-button" type="button" @click="openCreate">
+            <Plus :size="17" /> 添加成员
+          </button>
+          <span class="permission-note"
+            ><ShieldCheck :size="15" /> {{ isAdmin ? "管理员权限" : "只读权限" }}</span
+          >
+        </div>
       </div>
 
       <div v-if="loading" class="empty-state">
@@ -215,7 +207,7 @@ onMounted(() => void loadMembers());
               type="button"
               aria-label="删除成员"
               title="删除成员"
-              @click="removeMember(member)"
+              @click="openDelete(member)"
             >
               <Trash2 :size="16" />
             </button>
@@ -284,17 +276,32 @@ onMounted(() => void loadMembers());
         </form>
       </section>
     </div>
+
+    <ConfirmDialog
+      :open="Boolean(deleteTarget)"
+      title="删除成员"
+      confirm-text="删除成员"
+      busy-text="删除中"
+      :busy="deleting"
+      :error="errorMessage"
+      @update:open="closeDeleteModal"
+      @confirm="removeMember"
+    >
+      <template #icon><Trash2 :size="18" /></template>
+      <template #description>
+        确定要删除成员“{{ deleteTarget?.username }}”吗？此操作无法撤销。
+      </template>
+    </ConfirmDialog>
   </main>
 </template>
 
 <style scoped>
 .members-page {
   min-height: 100dvh;
-  padding: 24px clamp(20px, 4vw, 64px) 48px;
-  color: #203027;
-  background: #f4f7f5;
+  padding: 28px clamp(20px, 4vw, 68px) 56px;
+  color: #202123;
+  background: #f7f7f5;
 }
-.members-toolbar,
 .surface-heading,
 .modal-header,
 .modal-actions {
@@ -303,28 +310,23 @@ onMounted(() => void loadMembers());
   justify-content: space-between;
   gap: 24px;
 }
-.members-toolbar {
-  justify-content: flex-end;
-  max-width: 1440px;
-  margin: 0 auto 14px;
-}
 .modal-eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: 0 0 12px;
-  color: #4c9065;
+  margin: 0 0 8px;
+  color: #8b8b88;
   font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.14em;
+  font-weight: 700;
+  letter-spacing: 0.12em;
 }
 h2 {
   margin: 0;
-  font-size: 18px;
+  color: #202123;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: 0;
 }
 .surface-heading p {
-  margin: 10px 0 0;
-  color: #718077;
+  margin: 8px 0 0;
+  color: #777875;
   font-size: 13px;
 }
 .primary-button,
@@ -333,116 +335,91 @@ h2 {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 38px;
-  border: 0;
-  border-radius: 7px;
+  min-height: 40px;
+  border-radius: 8px;
   padding: 0 15px;
   font-size: 13px;
-  font-weight: 750;
+  font-weight: 650;
   cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease,
+    box-shadow 150ms ease;
 }
 .primary-button {
-  color: #143322;
-  background: #b7e7cb;
-  box-shadow: 0 5px 12px rgba(61, 142, 88, 0.12);
+  border: 1px solid #202123;
+  color: #ffffff;
+  background: #202123;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
 }
-.primary-button:hover {
-  background: #a6dbb9;
+.primary-button:hover:not(:disabled) {
+  border-color: #343536;
+  background: #343536;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
 }
 .secondary-button {
-  border: 1px solid #d9e0db;
-  color: #55645b;
-  background: #fff;
+  border: 1px solid #d6d6d3;
+  color: #4f504e;
+  background: #ffffff;
 }
-.summary-row {
-  display: grid;
-  max-width: 1440px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin: 0 auto 18px;
+.secondary-button:hover:not(:disabled) {
+  border-color: #bdbdb9;
+  background: #f6f6f4;
 }
-.summary-item {
-  display: flex;
-  min-height: 78px;
-  align-items: center;
-  gap: 12px;
-  border: 1px solid #dfe8e1;
-  border-radius: 9px;
-  padding: 15px 18px;
-  background: #fff;
-  box-shadow: 0 5px 14px rgba(33, 67, 47, 0.045);
-}
-.summary-icon {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  flex: 0 0 auto;
-  place-items: center;
-  border-radius: 8px;
-  color: #39805a;
-  background: #e8f4eb;
-}
-.summary-item--admin .summary-icon {
-  color: #8b7040;
-  background: #f7f0df;
-}
-.summary-item--secure .summary-icon {
-  color: #526f99;
-  background: #eaf0f8;
-}
-.summary-item > div {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-.summary-item strong {
-  color: #24362b;
-  font-size: 20px;
-  line-height: 1.1;
-}
-.summary-item > div > span {
-  color: #7d8a82;
-  font-size: 11px;
+.primary-button:disabled,
+.secondary-button:disabled,
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 .alert,
 .form-error {
-  margin: 16px 0;
-  border: 1px solid #f0c8c8;
-  border-radius: 6px;
+  margin: 16px auto;
+  max-width: 1320px;
+  border: 1px solid #ebcaca;
+  border-radius: 8px;
   padding: 11px 13px;
-  color: #a24a4a;
-  background: #fff7f7;
+  color: #9c4141;
+  background: #fff8f8;
   font-size: 13px;
 }
 .members-surface {
-  max-width: 1440px;
+  max-width: 1320px;
   margin: 0 auto;
-  border: 1px solid #e0e7e2;
-  border-radius: 10px;
-  background: #fff;
-  box-shadow: 0 8px 24px rgba(32, 64, 45, 0.045);
+  overflow: hidden;
+  border: 1px solid #e4e4e1;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.035);
 }
 .surface-heading {
   align-items: center;
   min-height: 92px;
-  padding: 18px 22px;
-  border-bottom: 1px solid #edf0ed;
+  padding: 20px 24px;
+  border-bottom: 1px solid #ecece9;
+}
+.surface-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 18px;
 }
 .permission-note {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #5c8069;
-  font-size: 11px;
-  font-weight: 700;
+  color: #557661;
+  font-size: 12px;
+  font-weight: 650;
   white-space: nowrap;
 }
 .member-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 280px));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 360px));
   justify-content: start;
-  gap: 14px;
-  padding: 14px 16px 16px;
+  gap: 16px;
+  padding: 18px;
 }
 .member-card {
   display: grid;
@@ -451,19 +428,23 @@ h2 {
   grid-template-rows: auto 1fr auto;
   align-items: stretch;
   gap: 18px;
-  border: 1px solid #e0e7e2;
-  border-radius: 8px;
-  padding: 15px 18px;
-  background: #fbfdfb;
+  border: 1px solid #e3e3e0;
+  border-radius: 10px;
+  padding: 18px;
+  background: #ffffff;
   transition:
-    border-color 160ms ease,
-    box-shadow 160ms ease,
-    transform 160ms ease;
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
 }
 .member-card:hover {
-  border-color: #c8dbcd;
-  box-shadow: 0 6px 16px rgba(38, 74, 51, 0.07);
+  border-color: #c9c9c5;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.06);
   transform: translateY(-1px);
+}
+.member-card:focus-within {
+  border-color: #8b8c88;
+  box-shadow: 0 0 0 3px rgba(32, 33, 35, 0.08);
 }
 .member-card__header,
 .member-identity,
@@ -491,45 +472,46 @@ h2 {
 .member-identity h3 {
   overflow: hidden;
   margin: 0 0 8px;
-  color: #26382c;
-  font-size: 15px;
-  font-weight: 750;
+  color: #202123;
+  font-size: 16px;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .avatar {
   display: grid;
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   flex: 0 0 auto;
   place-items: center;
   border-radius: 50%;
-  color: #397453;
-  background: #e8f4eb;
+  color: #565754;
+  background: #f0f0ee;
 }
 .role-badge {
   border-radius: 999px;
   padding: 5px 8px;
-  color: #657269;
-  background: #f2f4f2;
+  color: #6d6e6b;
+  background: #f1f1ef;
   font-size: 11px;
 }
 .role-badge--admin {
-  color: #397453;
-  background: #e8f4eb;
+  color: #4d765b;
+  background: #edf6ef;
 }
 .password-mask {
-  color: #8a988f;
-  letter-spacing: 0.18em;
+  color: #8a8b87;
+  letter-spacing: 0.16em;
 }
 .password-mask svg {
+  color: #979894;
   letter-spacing: 0;
 }
 .member-card__details {
   display: grid;
   align-content: center;
   grid-template-columns: 1fr;
-  gap: 16px;
+  gap: 18px;
 }
 .member-detail {
   display: grid;
@@ -537,11 +519,11 @@ h2 {
   gap: 7px;
 }
 .detail-label {
-  color: #8a968e;
+  color: #969793;
   font-size: 11px;
 }
 .date-value {
-  color: #78847d;
+  color: #666764;
   font-size: 13px;
 }
 .member-card__actions {
@@ -554,23 +536,34 @@ h2 {
   width: 32px;
   height: 32px;
   place-items: center;
-  border: 0;
-  border-radius: 6px;
-  color: #64736a;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #777875;
   background: transparent;
   cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
 }
-.icon-button:hover,
+.icon-button:hover:not(:disabled),
 .close-button:hover {
-  background: #eef5ef;
-  color: #326d4c;
+  border-color: #e0e0dd;
+  color: #202123;
+  background: #f4f4f2;
 }
-.icon-button--danger:hover {
-  color: #b65353;
-  background: #fff0f0;
+.icon-button:focus-visible,
+.close-button:focus-visible {
+  outline: 2px solid #6f8b77;
+  outline-offset: 2px;
+}
+.icon-button--danger:hover:not(:disabled) {
+  border-color: #efd5d5;
+  color: #a44747;
+  background: #fff5f5;
 }
 .protected-label {
-  color: #9aa49e;
+  color: #969793;
   font-size: 11px;
   white-space: nowrap;
 }
@@ -580,7 +573,7 @@ h2 {
   align-items: center;
   justify-content: center;
   gap: 9px;
-  color: #7b887f;
+  color: #777875;
   font-size: 13px;
 }
 .spin {
@@ -598,16 +591,16 @@ h2 {
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(22, 37, 29, 0.28);
+  background: rgba(32, 33, 35, 0.24);
   backdrop-filter: blur(2px);
 }
 .modal {
   width: min(100%, 440px);
-  border: 1px solid #dfe7e1;
+  border: 1px solid #e0e0dd;
   border-radius: 12px;
-  padding: 22px;
-  background: #fff;
-  box-shadow: 0 24px 70px rgba(22, 37, 29, 0.22);
+  padding: 24px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.16);
 }
 .modal-header {
   align-items: flex-start;
@@ -623,30 +616,36 @@ h2 {
 .member-form label {
   display: grid;
   gap: 7px;
-  color: #4a5b50;
+  color: #4f504e;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 650;
 }
 .member-form small {
   margin-left: 6px;
-  color: #8d9991;
+  color: #969793;
   font-size: 11px;
   font-weight: 400;
 }
 .member-form input {
   width: 100%;
   height: 42px;
-  border: 1px solid #d9e2db;
-  border-radius: 6px;
+  border: 1px solid #d8d8d5;
+  border-radius: 7px;
   padding: 0 11px;
-  color: #26382c;
+  color: #202123;
   outline: 0;
-  background: #fbfdfb;
+  background: #ffffff;
   font-size: 13px;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+.member-form input:hover:not(:disabled) {
+  border-color: #bdbdb9;
 }
 .member-form input:focus {
-  border-color: #78b58b;
-  box-shadow: 0 0 0 3px rgba(104, 181, 130, 0.12);
+  border-color: #777875;
+  box-shadow: 0 0 0 3px rgba(32, 33, 35, 0.1);
 }
 .modal-actions {
   align-items: center;
@@ -657,34 +656,41 @@ h2 {
   .members-page {
     padding: 16px 12px 32px;
   }
-  .summary-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-  }
-  .summary-item:last-child {
-    grid-column: 1 / -1;
-  }
   .surface-heading {
     display: grid;
     gap: 14px;
     min-height: 0;
-    padding: 16px;
+    padding: 18px 16px;
+  }
+  .surface-actions {
+    width: 100%;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .surface-actions .primary-button {
+    width: 100%;
   }
   .member-cards {
-    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
-    padding: 10px;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 12px;
   }
   .member-card {
     max-width: none;
     gap: 14px;
-    padding: 15px;
+    padding: 16px;
   }
   .member-card__details {
-    gap: 12px;
+    gap: 14px;
   }
   .member-card__actions {
     justify-content: flex-start;
+  }
+  .modal-backdrop {
+    padding: 12px;
+  }
+  .modal {
+    padding: 20px;
   }
 }
 </style>

@@ -26,6 +26,7 @@ class RequestContext:
 
 def get_request_context(request: Request) -> RequestContext:
     settings: Settings = get_settings()
+    user_id = require_authenticated(request)
     # 优先透传调用方请求 ID，便于将 API、Graph 和数据库日志关联起来。
     request_id = request.headers.get("X-Request-ID") or str(uuid4())
     registry = get_database_registry(settings)
@@ -44,7 +45,7 @@ def get_request_context(request: Request) -> RequestContext:
         policy = local_access_policy(settings)
     return RequestContext(
         request_id=request_id,
-        user_id=require_authenticated(request),
+        user_id=user_id,
         access_policy=policy,
     )
 

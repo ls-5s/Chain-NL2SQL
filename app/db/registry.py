@@ -40,6 +40,7 @@ class DatabaseRegistry:
         connection = sqlite3.connect(self.path, timeout=5, check_same_thread=False)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout = 5000")
+        connection.execute("PRAGMA foreign_keys = ON")
         try:
             yield connection
             connection.commit()
@@ -75,7 +76,6 @@ class DatabaseRegistry:
                 )
                 """
             )
-            connection.execute("PRAGMA foreign_keys = ON")
             existing = connection.execute(
                 "SELECT id FROM database_registry WHERE id = 'demo'"
             ).fetchone()

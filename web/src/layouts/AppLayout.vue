@@ -99,10 +99,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleAgentShortcut)
     </header>
 
     <aside class="rail" aria-label="主导航">
-      <RouterLink class="rail-logo" to="/agent" aria-label="Chain-NL2SQL 首页" title="Chain-NL2SQL">
-        <Database :size="27" :stroke-width="1.8" aria-hidden="true" />
-      </RouterLink>
-
       <nav class="rail-nav">
         <RouterLink
           class="rail-link rail-link--agent"
@@ -397,7 +393,6 @@ kbd {
   background: #ffffff;
 }
 
-.rail-logo,
 .rail-link,
 .rail-button,
 .user-button {
@@ -410,13 +405,6 @@ kbd {
   text-decoration: none;
 }
 
-.rail-logo {
-  width: 100%;
-  height: 56px;
-  border-bottom: 1px solid #f1f1f1;
-}
-
-.rail-logo:hover,
 .rail-link:hover,
 .rail-button:hover {
   color: #000000;

@@ -16,6 +16,7 @@ from app.api.response_mapper import map_query_state
 from app.config.settings import Settings, get_settings
 from app.conversations.repository import ConversationNotFoundError, ConversationRepository, InvalidResultReferenceError
 from app.db.sqlite_adapter import SQLiteAdapter
+from app.db.mysql_adapter import MySQLAdapter
 from app.graph.builder import build_query_graph
 from app.graph.state import NL2SQLState, create_initial_state
 from app.llm.factory import LLMConfigurationError, create_openai_client
@@ -123,7 +124,7 @@ def list_databases(
     records = registry.list(enabled_only=True)
     return DatabaseListResponse(
         database_ids=[item.id for item in records],
-        databases=[_database_response(registry, item) for item in records],
+        databases=[_database_response(registry, item).model_dump(mode="json") for item in records],
     )
 
 
@@ -201,6 +202,12 @@ def test_database(
     except NotImplementedError as error:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(error)) from error
     except Exception as error:
+        logger.error(
+            "Database schema test failed database_id=%s exception_type=%s detail=%s",
+            database_id,
+            type(error).__name__,
+            redact_error(str(error))[:300] or "-",
+        )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="数据库连接或 Schema 读取失败。") from error
     return _database_response(registry, record)
 
@@ -280,7 +287,9 @@ def _validated_database_config(dialect: str, config: dict[str, object]) -> dict[
 def _adapter_for_registration(record, settings: Settings):
     if record.dialect == "sqlite":
         return SQLiteAdapter(record.id, str(record.config["path"]), settings.result_row_limit)
-    raise NotImplementedError("MySQL 适配器尚未启用，请先配置服务端 MySQL 连接实现。")
+    if record.dialect == "mysql":
+        return MySQLAdapter(record.id, record.config, settings.result_row_limit)
+    raise NotImplementedError("数据库方言尚未配置适配器。")
 
 
 @api_router.post("/query")
