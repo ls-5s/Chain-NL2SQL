@@ -13,13 +13,12 @@ app/
 ├── llm/
 │   ├── client.py          # LLMClient 协议和 ModelResponse 统一响应模型
 │   ├── factory.py         # ChatOpenAI/OpenAI 兼容客户端、配置校验和调用适配
-│   ├── prompts.py         # 意图分类、通用回答、澄清、SQL 生成和 SQL 修复 Prompt
+│   ├── prompts.py         # 意图分类、通用回答、SQL 生成和 SQL 修复 Prompt
 │   ├── output_parser.py   # 提取并规范化模型生成的 SQL
 │   └── retry_policy.py    # LLM 超时预算、临时故障识别和有限重试
 ├── graph/
 │   ├── intent_node.py     # 规则优先、LLM 兜底的意图分类
 │   ├── general_answer_node.py # 非数据库问题的通用回答
-│   ├── clarification_node.py  # 数据问题信息不足时的澄清回答
 │   └── generation_node.py # 根据 Schema 生成只读 SQL
 └── config/
     └── settings.py        # API Key、Base URL、模型和超时配置

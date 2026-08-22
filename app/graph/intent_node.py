@@ -32,7 +32,7 @@ def make_intent_gate_node(llm_client: LLMClient, timeout_seconds: float, confide
         parsed = _parse_intent(response.content)
         if parsed is None or parsed["confidence"] < confidence_threshold:
             return {
-                "intent": QueryIntent.CLARIFICATION,
+                "intent": QueryIntent.GENERAL_CHAT,
                 "intent_confidence": parsed["confidence"] if parsed else 0.0,
                 "intent_reason": "LLM 分类置信度不足或输出格式无效",
                 "intent_source": "llm",

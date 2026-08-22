@@ -7,7 +7,13 @@ import {
   fetchConversations,
   streamConversationQuery,
 } from "@/api/client";
-import type { ConversationDetail, ConversationMessage, ConversationSummary, QueryResponse, QueryStreamEvent } from "@/types/api";
+import type {
+  ConversationDetail,
+  ConversationMessage,
+  ConversationSummary,
+  QueryResponse,
+  QueryStreamEvent,
+} from "@/types/api";
 
 const DEFAULT_DATABASE_ID = "demo";
 
@@ -27,8 +33,11 @@ export interface AgentConversationStore {
   conversations: Ref<ConversationSummary[]>;
   activeConversationId: Ref<string>;
   activeConversation: ComputedRef<AgentConversation>;
+  canCreateConversation: ComputedRef<boolean>;
   recentConversations: ComputedRef<ConversationSummary[]>;
-  isBusy: Ref<boolean>;
+  isBusy: ComputedRef<boolean>;
+  isMutating: Ref<boolean>;
+  isConversationBusy: (conversationId: string) => boolean;
   initializationError: Ref<string | null>;
   initialize: () => Promise<void>;
   createConversation: (databaseId?: string) => Promise<void>;
@@ -36,7 +45,11 @@ export interface AgentConversationStore {
   deleteConversation: (conversationId: string) => Promise<void>;
   setDraft: (draft: string) => void;
   setDatabaseId: (databaseId: string) => void;
-  sendQuestion: (question: string, onProgress: (event: QueryStreamEvent) => void, referenceIds?: string[]) => Promise<void>;
+  sendQuestion: (
+    question: string,
+    onProgress: (event: QueryStreamEvent) => void,
+    referenceIds?: string[],
+  ) => Promise<void>;
 }
 
 export const agentConversationStoreKey: InjectionKey<AgentConversationStore> = Symbol("agentConversationStore");
@@ -56,25 +69,53 @@ function mapConversation(detail: ConversationDetail, draft = ""): AgentConversat
 export function createAgentConversationStore(): AgentConversationStore {
   const conversations = ref<ConversationSummary[]>([]);
   const activeConversationId = ref("");
-  const activeDetail = ref<ConversationDetail | null>(null);
-  const draft = ref("");
-  const isBusy = ref(false);
+  const conversationDetails = ref<Record<string, ConversationDetail>>({});
+  const drafts = ref<Record<string, string>>({});
+  const busyConversationIds = ref<Record<string, boolean>>({});
+  const isMutating = ref(false);
   const initializationError = ref<string | null>(null);
+  let selectionRequest = 0;
+
+  function isConversationBusy(conversationId: string) {
+    return Boolean(busyConversationIds.value[conversationId]);
+  }
+
+  const isBusy = computed(() => isConversationBusy(activeConversationId.value));
+  const activeDetail = computed(() => conversationDetails.value[activeConversationId.value]);
   const activeConversation = computed<AgentConversation>(() =>
     activeDetail.value
-      ? mapConversation(activeDetail.value, draft.value)
-      : { id: "", title: "新聊天", messages: [], draft: draft.value, databaseId: DEFAULT_DATABASE_ID, createdAt: "", updatedAt: "" },
+      ? mapConversation(activeDetail.value, drafts.value[activeConversationId.value] ?? "")
+      : {
+          id: "",
+          title: "新聊天",
+          messages: [],
+          draft: drafts.value[activeConversationId.value] ?? "",
+          databaseId: DEFAULT_DATABASE_ID,
+          createdAt: "",
+          updatedAt: "",
+        },
   );
+  const canCreateConversation = computed(() => activeConversation.value.messages.length > 0);
   const recentConversations = computed(() => conversations.value);
+
+  function setConversationBusy(conversationId: string, busy: boolean) {
+    const next = { ...busyConversationIds.value };
+    if (busy) next[conversationId] = true;
+    else delete next[conversationId];
+    busyConversationIds.value = next;
+  }
 
   async function refreshList() {
     conversations.value = await fetchConversations();
   }
 
-  async function loadConversation(conversationId: string) {
-    activeDetail.value = await fetchConversation(conversationId);
-    activeConversationId.value = conversationId;
-    draft.value = "";
+  async function loadConversation(conversationId: string, activate = true) {
+    const detail = await fetchConversation(conversationId);
+    conversationDetails.value = { ...conversationDetails.value, [conversationId]: detail };
+    if (drafts.value[conversationId] === undefined) {
+      drafts.value = { ...drafts.value, [conversationId]: "" };
+    }
+    if (activate) activeConversationId.value = conversationId;
   }
 
   async function createConversationInternal(databaseId = DEFAULT_DATABASE_ID) {
@@ -84,8 +125,8 @@ export function createAgentConversationStore(): AgentConversationStore {
   }
 
   async function initialize() {
-    if (isBusy.value) return;
-    isBusy.value = true;
+    if (isMutating.value) return;
+    isMutating.value = true;
     initializationError.value = null;
     try {
       await refreshList();
@@ -94,49 +135,69 @@ export function createAgentConversationStore(): AgentConversationStore {
     } catch (error) {
       initializationError.value = error instanceof Error ? error.message : "无法加载会话，请重试。";
     } finally {
-      isBusy.value = false;
+      isMutating.value = false;
     }
   }
 
   async function createConversation(databaseId = DEFAULT_DATABASE_ID) {
-    if (isBusy.value) return;
-    isBusy.value = true;
+    if (isMutating.value || isBusy.value) return;
+    isMutating.value = true;
     try {
       await createConversationInternal(databaseId);
     } finally {
-      isBusy.value = false;
+      isMutating.value = false;
     }
   }
 
   async function selectConversation(conversationId: string) {
-    if (isBusy.value || conversationId === activeConversationId.value) return;
-    isBusy.value = true;
-    try {
-      await loadConversation(conversationId);
-    } finally {
-      isBusy.value = false;
+    if (conversationId === activeConversationId.value) return;
+    const requestId = ++selectionRequest;
+    if (conversationDetails.value[conversationId]) {
+      activeConversationId.value = conversationId;
+      if (drafts.value[conversationId] === undefined) {
+        drafts.value = { ...drafts.value, [conversationId]: "" };
+      }
+      return;
     }
+
+    const detail = await fetchConversation(conversationId);
+    conversationDetails.value = { ...conversationDetails.value, [conversationId]: detail };
+    if (drafts.value[conversationId] === undefined) {
+      drafts.value = { ...drafts.value, [conversationId]: "" };
+    }
+    if (requestId === selectionRequest) activeConversationId.value = conversationId;
   }
 
   async function deleteConversation(conversationId: string) {
-    if (isBusy.value) return;
-    isBusy.value = true;
+    if (isMutating.value || isConversationBusy(conversationId)) return;
+    isMutating.value = true;
     try {
       await deleteConversationRequest(conversationId);
+      const nextDetails = { ...conversationDetails.value };
+      const nextDrafts = { ...drafts.value };
+      delete nextDetails[conversationId];
+      delete nextDrafts[conversationId];
+      conversationDetails.value = nextDetails;
+      drafts.value = nextDrafts;
       await refreshList();
+
       if (!conversations.value.length) {
         activeConversationId.value = "";
-        activeDetail.value = null;
         await createConversationInternal(DEFAULT_DATABASE_ID);
+      } else if (activeConversationId.value === conversationId) {
+        const replacement = conversations.value.find((conversation) => !isConversationBusy(conversation.id));
+        if (replacement) await loadConversation(replacement.id);
+        else await createConversationInternal(DEFAULT_DATABASE_ID);
       }
-      else if (activeConversationId.value === conversationId) await loadConversation(conversations.value[0].id);
     } finally {
-      isBusy.value = false;
+      isMutating.value = false;
     }
   }
 
   function setDraft(value: string) {
-    draft.value = value;
+    const conversationId = activeConversationId.value;
+    if (!conversationId) return;
+    drafts.value = { ...drafts.value, [conversationId]: value };
   }
 
   function setDatabaseId(databaseId: string) {
@@ -144,48 +205,68 @@ export function createAgentConversationStore(): AgentConversationStore {
     if (activeDetail.value) activeDetail.value.database_id = databaseId;
   }
 
-  async function sendQuestion(question: string, onProgress: (event: QueryStreamEvent) => void, referenceIds: string[] = []) {
+  async function sendQuestion(
+    question: string,
+    onProgress: (event: QueryStreamEvent) => void,
+    referenceIds: string[] = [],
+  ) {
     const conversationId = activeConversationId.value;
-    if (!conversationId || isBusy.value) return;
-    isBusy.value = true;
-    const existing = activeDetail.value;
+    const existing = conversationDetails.value[conversationId];
+    if (!conversationId || !existing || isConversationBusy(conversationId)) return;
+
+    setConversationBusy(conversationId, true);
     const timestamp = new Date().toISOString();
-    if (existing) {
-      existing.messages.push(
-        { id: `local-user-${Date.now()}`, turn_id: "", role: "user", content: question, status: "succeeded", progress: [], created_at: timestamp },
-        { id: `local-assistant-${Date.now()}`, turn_id: "", role: "assistant", content: "正在准备查询", status: "running", progress: [], created_at: timestamp },
-      );
-    }
-    draft.value = "";
+    existing.messages.push(
+      {
+        id: `local-user-${Date.now()}`,
+        turn_id: "",
+        role: "user",
+        content: question,
+        status: "succeeded",
+        progress: [],
+        created_at: timestamp,
+      },
+      {
+        id: `local-assistant-${Date.now()}`,
+        turn_id: "",
+        role: "assistant",
+        content: "正在准备查询",
+        status: "running",
+        progress: [],
+        created_at: timestamp,
+      },
+    );
+    drafts.value = { ...drafts.value, [conversationId]: "" };
+    const assistant = existing.messages.at(-1);
     let response: QueryResponse | null = null;
+
     try {
-      response = await streamConversationQuery(conversationId, { question, reference_ids: referenceIds }, (event) => {
-        const assistant = activeDetail.value?.messages.at(-1);
-        if (assistant?.role === "assistant") {
-          if (event.message) assistant.content = event.message;
-          if (event.node) assistant.progress.push(event);
-        }
-        onProgress(event);
-      });
-      const assistant = activeDetail.value?.messages.at(-1);
+      response = await streamConversationQuery(
+        conversationId,
+        { question, reference_ids: referenceIds },
+        (event) => {
+          if (assistant?.role === "assistant") {
+            if (event.message) assistant.content = event.message;
+            if (event.node) assistant.progress.push(event);
+          }
+          onProgress(event);
+        },
+      );
       if (assistant?.role === "assistant") {
         assistant.content = response.final_answer;
         assistant.status = response.status;
         assistant.response = response;
       }
       await refreshList();
-      await loadConversation(conversationId);
+      await loadConversation(conversationId, false);
     } catch (error) {
-      if (!response) {
-        const assistant = activeDetail.value?.messages.at(-1);
-        if (assistant?.role === "assistant") {
-          assistant.status = "failed";
-          assistant.content = error instanceof Error ? error.message : "查询未完成。";
-        }
+      if (!response && assistant?.role === "assistant") {
+        assistant.status = "failed";
+        assistant.content = error instanceof Error ? error.message : "查询未完成。";
       }
       throw error;
     } finally {
-      isBusy.value = false;
+      setConversationBusy(conversationId, false);
     }
   }
 
@@ -193,8 +274,11 @@ export function createAgentConversationStore(): AgentConversationStore {
     conversations,
     activeConversationId,
     activeConversation,
+    canCreateConversation,
     recentConversations,
     isBusy,
+    isMutating,
+    isConversationBusy,
     initializationError,
     initialize,
     createConversation,

@@ -29,7 +29,6 @@ app/
 │   ├── validation_node.py    # SQL AST、安全策略和白名单校验
 │   ├── execution_node.py     # 受限 SQLite 查询执行
 │   ├── general_answer_node.py # 非数据库问题的通用回答
-│   ├── clarification_node.py # 信息不足时的澄清问题
 │   ├── finalize_node.py      # 统一生成最终状态和用户说明
 │   └── repair_node.py        # 有限错误类别的 SQL 自动修复节点
 ├── rag/

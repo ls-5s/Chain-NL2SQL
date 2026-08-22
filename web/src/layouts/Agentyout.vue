@@ -252,7 +252,7 @@ onBeforeUnmount(() => {
         <button
           class="agent-sidebar__new-button"
           type="button"
-          :disabled="store.isBusy.value"
+          :disabled="store.isMutating.value || store.isBusy.value || !store.canCreateConversation.value"
           @click="createConversation"
         >
           <SquarePen :size="20" :stroke-width="1.9" aria-hidden="true" />
@@ -261,7 +261,7 @@ onBeforeUnmount(() => {
 
         <div v-if="store.initializationError.value" class="agent-sidebar__load-error" role="alert">
           <span>{{ store.initializationError.value }}</span>
-          <button type="button" :disabled="store.isBusy.value" @click="store.initialize">
+          <button type="button" :disabled="store.isMutating.value" @click="store.initialize">
             重试加载
           </button>
         </div>
@@ -302,7 +302,6 @@ onBeforeUnmount(() => {
                 <button
                   class="agent-sidebar__conversation"
                   type="button"
-                  :disabled="store.isBusy.value"
                   :title="conversation.title"
                   @click="selectConversation(conversation.id)"
                 >
@@ -325,7 +324,7 @@ onBeforeUnmount(() => {
                 <button
                   class="agent-sidebar__delete"
                   type="button"
-                  :disabled="store.isBusy.value"
+                  :disabled="store.isMutating.value || store.isConversationBusy(conversation.id)"
                   :aria-label="`删除会话 ${conversation.title}`"
                   title="删除会话"
                   @click="store.deleteConversation(conversation.id)"
@@ -374,7 +373,6 @@ onBeforeUnmount(() => {
             <li v-for="conversation in filteredConversations" :key="conversation.id">
               <button
                 type="button"
-                :disabled="store.isBusy.value"
                 @click="selectConversation(conversation.id)"
               >
                 <MessageCircle :size="24" :stroke-width="1.8" aria-hidden="true" />
@@ -695,7 +693,7 @@ onBeforeUnmount(() => {
   color: #343434;
   background: transparent;
   font:
-    21px "Microsoft YaHei",
+    16px "Microsoft YaHei",
     "PingFang SC",
     "Segoe UI",
     system-ui,
@@ -1007,7 +1005,7 @@ onBeforeUnmount(() => {
   .agent-sidebar__shortcuts a,
   .agent-sidebar__shortcuts span,
   .agent-sidebar__conversation {
-    font-size: 18px;
+    font-size: 16px;
   }
 
   .agent-sidebar-toggle,

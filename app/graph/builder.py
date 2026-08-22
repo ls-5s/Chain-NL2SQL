@@ -8,7 +8,6 @@ from langgraph.graph import END, StateGraph
 
 from app.api.authorization import AccessPolicy
 from app.db.base import DatabaseExecutionError, DatabaseExecutor
-from app.graph.clarification_node import make_clarification_node
 from app.graph.execution_node import make_execution_node
 from app.graph.finalize_node import make_finalize_node
 from app.graph.general_answer_node import make_general_answer_node
@@ -41,7 +40,6 @@ def build_query_graph(
     graph.add_node("execute_sql", make_execution_node(database_executor, access_policy, query_timeout_seconds))
     graph.add_node("repair_sql", make_repair_node(llm_client, model_timeout_seconds))
     graph.add_node("general_answer", make_general_answer_node(llm_client, model_timeout_seconds))
-    graph.add_node("clarify", make_clarification_node(llm_client, model_timeout_seconds))
     graph.add_node("finalize", make_finalize_node())
     graph.set_entry_point("intent_gate")
     graph.add_conditional_edges(
@@ -50,7 +48,6 @@ def build_query_graph(
         {
             QueryIntent.DATA_QUERY.value: "retrieve_schema",
             QueryIntent.GENERAL_CHAT.value: "general_answer",
-            QueryIntent.CLARIFICATION.value: "clarify",
         },
     )
     graph.add_conditional_edges(
@@ -67,13 +64,12 @@ def build_query_graph(
     )
     graph.add_edge("repair_sql", "validate_sql")
     graph.add_edge("general_answer", "finalize")
-    graph.add_edge("clarify", "finalize")
     graph.add_edge("finalize", END)
     return graph.compile()
 
 
 def _route_after_intent(state: NL2SQLState) -> str:
-    intent = state.get("intent", QueryIntent.CLARIFICATION)
+    intent = state.get("intent", QueryIntent.GENERAL_CHAT)
     return intent.value if isinstance(intent, QueryIntent) else str(intent)
 
 

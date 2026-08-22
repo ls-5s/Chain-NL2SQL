@@ -16,17 +16,15 @@
 | Intent | Precision | Recall | F1 | Support |
 | --- | ---: | ---: | ---: | ---: |
 | `data_query` | 100.00% | 100.00% | 100.00% | 20 |
-| `general_chat` | 100.00% | 100.00% | 100.00% | 15 |
-| `clarification` | 100.00% | 93.33% | 96.55% | 15 |
+| `general_chat` | 100.00% | 96.67% | 98.31% | 30 |
 
 ## Confusion Matrix
 
-| Expected \ Predicted | data_query | general_chat | clarification | error |
-| --- | ---: | ---: | ---: | ---: |
-| `data_query` | 20 | 0 | 0 | 0 |
-| `general_chat` | 0 | 15 | 0 | 0 |
-| `clarification` | 0 | 0 | 14 | 1 |
+| Expected \ Predicted | data_query | general_chat | error |
+| --- | ---: | ---: | ---: |
+| `data_query` | 20 | 0 | 0 |
+| `general_chat` | 0 | 29 | 1 |
 
 ## Misclassified Samples
 
-- `业务表现怎么样？`: expected `clarification`, predicted `error`, source `error`, confidence `0.0`
+- `业务表现怎么样？`: expected `general_chat`, predicted `error`, source `error`, confidence `0.0`

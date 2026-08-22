@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import {
   AudioLines,
@@ -23,6 +23,8 @@ import type {
 
 const databases = ref<string[]>([]);
 const conversation = ref<HTMLElement | null>(null);
+const emptyQuestionInput = ref<HTMLTextAreaElement | null>(null);
+const activeQuestionInput = ref<HTMLTextAreaElement | null>(null);
 const agentStep = ref("正在准备查询");
 const referenceIds = ref<string[]>([]);
 const store = useAgentConversationStore();
@@ -32,6 +34,36 @@ const databaseId = computed({ get: () => store.activeConversation.value.database
 const loading = computed(() => store.isBusy.value);
 const canSubmit = computed(() => question.value.trim().length > 0 && !loading.value && Boolean(store.activeConversationId.value));
 
+async function resizeQuestionInput(input: HTMLTextAreaElement | null) {
+  if (!input) return;
+
+  await nextTick();
+  input.style.height = "auto";
+  const styles = window.getComputedStyle(input);
+  const minHeight = Number.parseFloat(styles.minHeight) || 0;
+  const maxHeight = Number.parseFloat(styles.maxHeight) || 130;
+  const contentHeight = input.scrollHeight;
+  const nextHeight = Math.min(Math.max(contentHeight, minHeight), maxHeight);
+
+  input.style.height = `${nextHeight}px`;
+  input.style.overflowY = contentHeight > maxHeight ? "auto" : "hidden";
+}
+
+async function resizeQuestionInputs() {
+  await Promise.all([
+    resizeQuestionInput(emptyQuestionInput.value),
+    resizeQuestionInput(activeQuestionInput.value),
+  ]);
+}
+
+function handleQuestionInput() {
+  void resizeQuestionInputs();
+}
+
+watch(question, () => {
+  void resizeQuestionInputs();
+}, { flush: "post" });
+
 onMounted(async () => {
   try {
     databases.value = await fetchDatabases();
@@ -39,31 +71,39 @@ onMounted(async () => {
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "无法加载数据库列表");
   }
+  await resizeQuestionInputs();
 });
 
 async function askQuestion(value = question.value) {
   const text = value.trim();
   if (!text || loading.value) return;
 
-  agentStep.value = "正在连接查询 Agent";
-  await scrollToBottom();
+  const requestConversationId = store.activeConversationId.value;
+  const requestReferenceIds = [...referenceIds.value];
+  const isRequestActive = () => store.activeConversationId.value === requestConversationId;
+  if (isRequestActive()) {
+    agentStep.value = "正在连接查询 Agent";
+    await scrollToBottom();
+  }
 
   try {
     await store.sendQuestion(
       text,
       (event) => {
-        if (event.message) {
+        if (isRequestActive() && event.message) {
           agentStep.value = event.message;
         }
       },
-      referenceIds.value,
+      requestReferenceIds,
     );
-    referenceIds.value = [];
+    if (isRequestActive()) referenceIds.value = [];
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "查询服务暂时不可用，请稍后重试。");
   } finally {
-    agentStep.value = "正在准备查询";
-    await scrollToBottom();
+    if (isRequestActive()) {
+      agentStep.value = "正在准备查询";
+      await scrollToBottom();
+    }
   }
 }
 
@@ -85,12 +125,12 @@ function intentLabel(intent: QueryIntent) {
   return {
     data_query: "数据查询",
     general_chat: "通用回答",
-    clarification: "需要补充信息",
-  }[intent];
+  }[intent] ?? "通用回答";
 }
 
-function intentClass(intent: QueryIntent) {
-  return `intent-pill intent-pill--${intent}`;
+function intentClass(intent: QueryIntent | string) {
+  const normalizedIntent = intent === "data_query" ? "data_query" : "general_chat";
+  return `intent-pill intent-pill--${normalizedIntent}`;
 }
 
 function resultColumns(result: QueryResult) {
@@ -144,12 +184,14 @@ async function scrollToBottom() {
                 <Plus :size="23" :stroke-width="1.8" />
               </button>
               <textarea
+                ref="emptyQuestionInput"
                 v-model="question"
                 rows="1"
                 maxlength="2000"
                 placeholder="向 Chain 查询数据"
                 aria-label="输入查询问题"
                 :disabled="loading"
+                @input="handleQuestionInput"
                 @keydown.enter.exact.prevent="handleSubmit"
               />
               <div class="composer__actions">
@@ -292,11 +334,13 @@ async function scrollToBottom() {
             <Plus :size="22" :stroke-width="1.8" />
           </button>
           <textarea
+            ref="activeQuestionInput"
             v-model="question"
             rows="1"
             maxlength="2000"
             placeholder="向 Chain 查询演示数据"
             aria-label="输入查询问题"
+            @input="handleQuestionInput"
             @keydown.enter.exact.prevent="handleSubmit"
           />
           <div class="composer__actions">
@@ -328,9 +372,6 @@ async function scrollToBottom() {
               <AudioLines v-else :size="19" :stroke-width="2" />
             </button>
           </div>
-        </div>
-        <div class="composer__context">
-          <span class="readonly-badge"><span class="readonly-dot" />只读模式</span>
         </div>
       </form>
       <p class="composer-note">Chain 可能会出错，请核对重要结果。</p>
@@ -585,10 +626,6 @@ async function scrollToBottom() {
 .intent-pill--general_chat {
   color: #486bb1;
   background: #eaf1ff;
-}
-.intent-pill--clarification {
-  color: #a06a16;
-  background: #fff2d9;
 }
 .message-bubble--loading {
   display: inline-flex;
@@ -852,6 +889,7 @@ async function scrollToBottom() {
   outline: 0;
   padding: 6px 2px;
   resize: none;
+  overflow-y: hidden;
   color: #242424;
   background: transparent;
   font: 21px/1.45 "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
@@ -934,28 +972,6 @@ async function scrollToBottom() {
   color: #b7b7b7;
   background: #ececec;
   cursor: default;
-}
-.composer__context {
-  display: flex;
-  align-items: center;
-  padding: 3px 2px 0 41px;
-}
-.readonly-badge {
-  display: inline-flex;
-  height: 22px;
-  align-items: center;
-  gap: 5px;
-  border-radius: 999px;
-  padding: 0 7px;
-  color: #668073;
-  background: #f0f7f3;
-  font-size: 10px;
-}
-.readonly-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #25a36f;
 }
 .composer-note {
   margin: 8px 0 0;
@@ -1107,9 +1123,6 @@ async function scrollToBottom() {
   }
   .composer {
     border-radius: 20px;
-  }
-  .composer__context {
-    padding-left: 39px;
   }
   .database-picker select {
     max-width: 50px;

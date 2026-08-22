@@ -6,9 +6,8 @@
 
 - `data_query`：明确需要本地业务数据，进入 Schema 读取、SQL 生成、安全校验和只读执行。
 - `general_chat`：不需要本地数据库，例如问候、常识、写作或代码辅助，交给通用问答节点。
-- `clarification`：疑似数据问题但缺少对象、指标、时间范围或筛选条件，交给澄清节点追问。
 
-意图闸门采用“规则优先 + LLM 兜底”：高置信度、数据库无关的规则直接分类；规则无法安全判断时才调用 LLM。LLM 必须返回包含 `intent`、`confidence`、`reason` 的严格 JSON，默认置信度阈值为 `INTENT_CONFIDENCE_THRESHOLD=0.75`。非法输出或低于阈值时保守进入 `clarification`，因此不会访问 Schema 或数据库。
+意图闸门采用“规则优先 + LLM 兜底”：高置信度、数据库无关的规则直接分类；规则无法安全判断时才调用 LLM。LLM 必须返回包含 `intent`、`confidence`、`reason` 的严格 JSON，默认置信度阈值为 `INTENT_CONFIDENCE_THRESHOLD=0.75`。非法输出或低于阈值时统一进入 `general_chat`，因此不会访问 Schema 或数据库。
 
 只有最终意图为 `data_query` 时才允许进入数据查询分支。真实模型需要在 `.env` 中配置 OpenAI 兼容服务：
 
@@ -36,13 +35,12 @@ app/
 │   ├── validation_node.py    # SQL AST、安全策略和白名单校验
 │   ├── execution_node.py     # 受限 SQLite 查询执行
 │   ├── general_answer_node.py # 非数据库问题的通用回答
-│   ├── clarification_node.py # 信息不足时的澄清问题
 │   ├── finalize_node.py      # 统一生成最终状态和用户说明
 │   └── repair_node.py        # 有限错误类别的 SQL 自动修复节点
 ├── llm/
 │   ├── client.py             # LLMClient 协议和 ModelResponse
 │   ├── factory.py            # OpenAI 兼容 ChatModel 适配
-│   ├── prompts.py            # 意图、SQL、通用回答和澄清 Prompt
+│   ├── prompts.py            # 意图、SQL 和通用回答 Prompt
 │   ├── output_parser.py      # 模型 SQL 输出提取
 │   └── retry_policy.py       # LLM 超时和有限重试
 ├── db/
@@ -95,7 +93,6 @@ flowchart TD
         INTENTLLM[LLM 分类 Prompt]
         CLASSIFY{意图}
         GENERAL[general_answer<br/>通用问答]
-        CLARIFY[clarify<br/>请求补充查询条件]
     end
 
     GRAPH --> IG
@@ -103,10 +100,8 @@ flowchart TD
     RULE -- 可直接判断 --> CLASSIFY
     RULE -- 无法判断 --> INTENTLLM --> CLASSIFY
     CLASSIFY -- general_chat --> GENERAL
-    CLASSIFY -- clarification --> CLARIFY
     CLASSIFY -- data_query --> RETRIEVE
     GENERAL --> FINAL
-    CLARIFY --> FINAL
 
     subgraph RAG[Schema-RAG 检索链路]
         RETRIEVE[retrieve_schema]
@@ -212,7 +207,6 @@ flowchart TD
     EXECUTE -.-> SSEPROGRESS
     REPAIR -.-> SSEPROGRESS
     GENERAL -.-> SSEPROGRESS
-    CLARIFY -.-> SSEPROGRESS
     FINAL --> RESPONSE --> COMPLETE --> F
     DBERR --> ERROR
     RAGERR --> ERROR
@@ -228,18 +222,16 @@ intent_gate
   │                  -> repair_sql（可修复错误且未达轮次） -> validate_sql
   │                  -> finalize -> END
   ├─ general_chat   -> general_answer -> finalize -> END
-  └─ clarification  -> clarify -> finalize -> END
 ```
 
 | 节点 | 实现 | 作用 | 数据库/Schema 访问 |
 | --- | --- | --- | --- |
-| `intent_gate` | [`intent_node.py`](../app/graph/intent_node.py) | 规则优先，必要时调用无 Schema Prompt 将问题分类为三种意图 | 否 |
+| `intent_gate` | [`intent_node.py`](../app/graph/intent_node.py) | 规则优先，必要时调用无 Schema Prompt 将问题分类为两种意图 | 否 |
 | `retrieve_schema` | [`index_manager.py`](../app/rag/index_manager.py) 中的 `SchemaIndexManager` | 按问题检索允许访问的 Schema，返回版本、模式和召回摘要 | 是，仅 `data_query` |
 | `generate_sql` | [`generation_node.py`](../app/graph/generation_node.py) | 基于固定 Schema 生成单条只读 SQL | 否 |
 | `validate_sql` | [`validation_node.py`](../app/graph/validation_node.py) | 执行 SQL AST、安全、表和字段白名单校验 | 否 |
 | `execute_sql` | [`execution_node.py`](../app/graph/execution_node.py) | 只读连接、参数绑定、超时中断和结果格式化 | 是，仅 `data_query` |
 | `general_answer` | [`general_answer_node.py`](../app/graph/general_answer_node.py) | 回答无需本地数据库的普通问题 | 否 |
-| `clarify` | [`clarification_node.py`](../app/graph/clarification_node.py) | 询问缺少的对象、指标、时间或筛选条件 | 否 |
 | `repair_sql` | [`repair_node.py`](../app/graph/repair_node.py) | 对有限数据库错误复用固定 Schema 生成修复 SQL，并受最大轮次限制 | 否 |
 | `finalize` | [`finalize_node.py`](../app/graph/finalize_node.py) | 整理回答、查询结果或受控错误 | 否 |
 
@@ -249,13 +241,13 @@ intent_gate
 
 ```json
 {
-  "intent": "data_query|general_chat|clarification",
+  "intent": "data_query|general_chat",
   "confidence": 0.0,
   "reason": "简短判断理由"
 }
 ```
 
-闸门会把来源记录为 `rule` 或 `llm`，并保留置信度和理由。LLM 输出必须是合法 JSON、只包含上述三个字段、标签属于白名单、置信度在 `[0, 1]`；否则或置信度低于阈值时返回 `clarification`，并设置 `intent_classification_valid=false`。模型调用异常由 API 流转换为安全的 `error` SSE，不会降级为数据库查询。
+闸门会把来源记录为 `rule` 或 `llm`，并保留置信度和理由。LLM 输出必须是合法 JSON、只包含上述三个字段、标签属于白名单、置信度在 `[0, 1]`；否则或置信度低于阈值时返回 `general_chat`，并设置 `intent_classification_valid=false`。模型调用异常由 API 流转换为安全的 `error` SSE，不会降级为数据库查询。
 
 | 用户问题 | 意图 | 后续处理 |
 | --- | --- | --- |
@@ -263,8 +255,8 @@ intent_gate
 | `上个月订单总额是多少` | `data_query` | 读取 Schema 并执行只读查询 |
 | `你好` | `general_chat` | 通用模型回答，不访问数据库 |
 | `帮我写一封邮件` | `general_chat` | 通用模型生成文本 |
-| `帮我看看数据` | `clarification` | 追问查询目标，不访问数据库 |
-| `订单情况怎么样？` | `clarification` | 追问指标、时间范围或筛选条件 |
+| `帮我看看数据` | `general_chat` | 交由通用模型回答，不访问数据库 |
+| `订单情况怎么样？` | `general_chat` | 交由通用模型回答，不访问数据库 |
 
 ### 4.2 数据查询链路
 
@@ -362,7 +354,7 @@ event: complete
 data: {"intent":"general_chat","status":"succeeded","result":null,"generated_sql":null}
 ```
 
-前端 [`web/src/api/client.ts`](../web/src/api/client.ts) 使用 `fetch` 读取 POST SSE 流；[`web/src/views/QueryView.vue`](../web/src/views/QueryView.vue) 实时展示 Agent 当前步骤。只有 `intent=data_query` 时展示数据库、结果表和 SQL 相关信息，通用回答和澄清仅展示回答内容及意图标签。
+前端 [`web/src/api/client.ts`](../web/src/api/client.ts) 使用 `fetch` 读取 POST SSE 流；[`web/src/views/QueryView.vue`](../web/src/views/QueryView.vue) 实时展示 Agent 当前步骤。只有 `intent=data_query` 时展示数据库、结果表和 SQL 相关信息，通用回答仅展示回答内容及意图标签。
 
 ## 7. API 与资源边界
 
@@ -384,7 +376,7 @@ data: {"intent":"general_chat","status":"succeeded","result":null,"generated_sql
 | 数据库不在访问策略中 | HTTP `403` |
 | 数据库 ID 为 `demo` 之外且无适配器 | HTTP `404` |
 | 模型密钥或模型名称缺失 | HTTP `503` |
-| 意图分类 JSON 无效或置信度不足 | `clarification`，不访问数据库 |
+| 意图分类 JSON 无效或置信度不足 | `general_chat`，不访问数据库 |
 | 流内模型调用失败 | SSE `error`，返回安全错误说明 |
 | Schema 读取或 SQL 执行异常 | SSE `error` 或受控失败状态；不泄漏连接信息 |
 | SQL 安全策略拒绝 | 状态为 `blocked`，通过 `complete` 返回受控结果 |
@@ -395,7 +387,7 @@ SQL 执行前还会进行单语句、只读、表/字段白名单和 AST 检查�
 
 为规则和 LLM 兜底分类建立了可重复的 50 条固定标注集：
 
-- 数据集：[`evals/intent_dataset.jsonl`](../evals/intent_dataset.jsonl)，包含 20 条 `data_query`、15 条 `general_chat`、15 条 `clarification`，每条记录含问题、标签、类别和标注理由。
+- 数据集：[`evals/intent_dataset.jsonl`](../evals/intent_dataset.jsonl)，包含 20 条 `data_query`、30 条 `general_chat`，每条记录含问题、标签、类别和标注理由。
 - 脚本：[`scripts/evaluate_intent.py`](../scripts/evaluate_intent.py)，复用生产 `intent_gate`，规则命中不调用 LLM，边界样例才调用真实 LLM。
 - 输出：[`evals/reports/intent_accuracy.json`](../evals/reports/intent_accuracy.json) 和 [`evals/reports/intent_accuracy.md`](../evals/reports/intent_accuracy.md)。运行时默认关闭 LangSmith 网络追踪。
 
@@ -412,9 +404,9 @@ SQL 执行前还会进行单语句、只读、表/字段白名单和 AST 检查�
 | LLM 兜底率 | **2.00%** |
 | LLM 调用次数 | 1 |
 | 平均延迟 | 33.78 ms |
-| 澄清类召回率 | 93.33% |
+| `general_chat` 召回率 | 96.67% |
 
-其中唯一未完成样例为 `业务表现怎么样？`，原因是 LLM 供应商暂时无可用通道，并非已确认的模型误分类。模型服务恢复后应重新运行评测，并比较总体准确率、澄清类召回率、误触数据库比例和 LLM 调用次数。
+其中唯一未完成样例为 `业务表现怎么样？`，原因是 LLM 供应商暂时无可用通道，并非已确认的模型误分类。模型服务恢复后应重新运行评测，并比较总体准确率、通用回答召回率、误触数据库比例和 LLM 调用次数。
 
 运行方式：
 
@@ -429,10 +421,10 @@ SQL 执行前还会进行单语句、只读、表/字段白名单和 AST 检查�
 
 - 明确数据查询进入 Schema、SQL 生成、校验和执行；
 - 明确通用问题只调用分类和通用回答，不访问 Schema 或数据库；
-- 模糊数据问题进入澄清，不访问数据库；
+- 信息不足的数据问题进入通用回答，不访问数据库；
 - 规则命中时不调用 LLM；
-- 非法 JSON、未知标签、字段缺失和低置信度返回澄清；
-- SSE 数据、通用、澄清和错误事件顺序及内容；
+- 非法 JSON、未知标签、字段缺失和低置信度返回通用回答；
+- SSE 数据、通用回答和错误事件顺序及内容；
 - 50 条评测集的样例数量、类别计数、指标和报告可序列化。
 
 运行后端测试：

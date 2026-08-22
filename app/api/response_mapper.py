@@ -15,9 +15,15 @@ def map_query_state(state: dict[str, Any]) -> QueryResponse:
     category = state.get("error_category")
     if category is not None and not isinstance(category, ErrorCategory):
         category = ErrorCategory(category)
-    intent = state.get("intent", QueryIntent.CLARIFICATION)
-    if not isinstance(intent, QueryIntent):
-        intent = QueryIntent(intent)
+    intent_value = state.get("intent", QueryIntent.GENERAL_CHAT)
+    if isinstance(intent_value, QueryIntent):
+        intent = intent_value
+    else:
+        # Unknown persisted turns remain renderable as general chat.
+        try:
+            intent = QueryIntent(intent_value)
+        except ValueError:
+            intent = QueryIntent.GENERAL_CHAT
     return QueryResponse(
         request_id=state["request_id"],
         intent=intent,

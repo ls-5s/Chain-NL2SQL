@@ -42,8 +42,25 @@ describe("agent conversations", () => {
     const store = createAgentConversationStore();
     await store.initialize();
     expect(store.activeConversationId.value).toBe("c1");
+    expect(store.canCreateConversation.value).toBe(false);
     expect(api.fetchConversations).toHaveBeenCalledOnce();
     expect(api.fetchConversation).toHaveBeenCalledWith("c1");
+  });
+
+  it("enables creating another conversation after the first message", async () => {
+    const persistedMessages = [
+      { id: "m1", turn_id: "t1", role: "user", content: "你好", status: "succeeded", progress: [], created_at: "2026-01-01T00:00:00Z" },
+      { id: "m2", turn_id: "t1", role: "assistant", content: "你好！", status: "succeeded", progress: [], created_at: "2026-01-01T00:00:01Z" },
+    ];
+    api.fetchConversation.mockResolvedValueOnce(detail()).mockResolvedValueOnce(detail(persistedMessages));
+    const store = createAgentConversationStore();
+    await store.initialize();
+
+    expect(store.canCreateConversation.value).toBe(false);
+
+    await store.sendQuestion("你好", vi.fn());
+
+    expect(store.canCreateConversation.value).toBe(true);
   });
 
   it("surfaces initialization failures and clears them on retry", async () => {

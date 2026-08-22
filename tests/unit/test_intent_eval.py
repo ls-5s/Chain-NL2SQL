@@ -14,10 +14,9 @@ def test_intent_dataset_has_expected_balanced_counts() -> None:
     records = load_dataset(ROOT / "evals" / "intent_dataset.jsonl")
 
     assert len(records) == 50
-    assert {category: sum(item["category"] == category for item in records) for category in {"clear_data", "general_chat", "ambiguous"}} == {
+    assert {category: sum(item["category"] == category for item in records) for category in {"clear_data", "general_chat"}} == {
         "clear_data": 20,
-        "general_chat": 15,
-        "ambiguous": 15,
+        "general_chat": 30,
     }
 
 
@@ -25,7 +24,7 @@ def test_report_calculates_accuracy_confusion_and_data_false_positives() -> None
     results = [
         {"expected_intent": QueryIntent.DATA_QUERY.value, "predicted_intent": QueryIntent.DATA_QUERY.value, "source": "rule", "confidence": 0.96, "classification_valid": True, "latency_ms": 1.0, "question": "q1", "category": "clear_data", "reason": "ok", "error_type": None},
         {"expected_intent": QueryIntent.GENERAL_CHAT.value, "predicted_intent": QueryIntent.DATA_QUERY.value, "source": "llm", "confidence": 0.8, "classification_valid": True, "latency_ms": 3.0, "question": "q2", "category": "general_chat", "reason": "wrong", "error_type": None},
-        {"expected_intent": QueryIntent.CLARIFICATION.value, "predicted_intent": QueryIntent.CLARIFICATION.value, "source": "llm", "confidence": 0.5, "classification_valid": False, "latency_ms": 5.0, "question": "q3", "category": "ambiguous", "reason": "low", "error_type": None},
+        {"expected_intent": QueryIntent.GENERAL_CHAT.value, "predicted_intent": QueryIntent.GENERAL_CHAT.value, "source": "llm", "confidence": 0.5, "classification_valid": False, "latency_ms": 5.0, "question": "q3", "category": "general_chat", "reason": "low", "error_type": None},
     ]
 
     report = build_report(results)

@@ -1,6 +1,6 @@
 export type QueryStatus = "running" | "succeeded" | "blocked" | "failed";
 
-export type QueryIntent = "data_query" | "general_chat" | "clarification";
+export type QueryIntent = "data_query" | "general_chat";
 
 export type ErrorCategory =
   | "syntax_error"

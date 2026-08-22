@@ -27,7 +27,7 @@ from app.llm.factory import create_openai_client
 from app.schemas.domain import QueryIntent
 
 LABELS = tuple(intent.value for intent in QueryIntent)
-EXPECTED_CATEGORY_COUNTS = {"clear_data": 20, "general_chat": 15, "ambiguous": 15}
+EXPECTED_CATEGORY_COUNTS = {"clear_data": 20, "general_chat": 30}
 
 
 def load_dataset(path: Path) -> list[dict[str, Any]]:

@@ -96,8 +96,8 @@ def test_general_chat_uses_llm_without_schema_or_sql_access(question: str) -> No
     assert state["intent_source"] == "rule"
 
 
-def test_ambiguous_question_uses_llm_clarification_without_database_access() -> None:
-    llm = FakeLLM(["请说明要查看的指标、时间范围和筛选条件。"])
+def test_ambiguous_question_uses_general_answer_without_database_access() -> None:
+    llm = FakeLLM(["可以告诉我你想了解的业务对象、指标和时间范围。"])
     graph = build_query_graph(
         database_executor=UnexpectedDatabaseAccess(),
         llm_client=llm,
@@ -108,14 +108,14 @@ def test_ambiguous_question_uses_llm_clarification_without_database_access() -> 
 
     state = graph.invoke(initial_state("帮我看看数据"))
 
-    assert state["intent"] == QueryIntent.CLARIFICATION
-    assert state["final_answer"] == "请说明要查看的指标、时间范围和筛选条件。"
+    assert state["intent"] == QueryIntent.GENERAL_CHAT
+    assert state["final_answer"] == "可以告诉我你想了解的业务对象、指标和时间范围。"
     assert len(llm.prompts) == 1
     assert state["intent_source"] == "rule"
 
 
-def test_invalid_intent_json_conservatively_uses_clarification() -> None:
-    llm = FakeLLM(["这看起来像数据问题", "请说明需要查询的业务对象和时间范围。"])
+def test_invalid_intent_json_uses_general_answer_without_database_access() -> None:
+    llm = FakeLLM(["这看起来像数据问题", "可以告诉我你想了解的业务对象和时间范围。"])
     graph = build_query_graph(
         database_executor=UnexpectedDatabaseAccess(),
         llm_client=llm,
@@ -126,13 +126,13 @@ def test_invalid_intent_json_conservatively_uses_clarification() -> None:
 
     state = graph.invoke(initial_state("这个事情怎么处理"))
 
-    assert state["intent"] == QueryIntent.CLARIFICATION
+    assert state["intent"] == QueryIntent.GENERAL_CHAT
     assert state["intent_classification_valid"] is False
-    assert state["final_answer"] == "请说明需要查询的业务对象和时间范围。"
+    assert state["final_answer"] == "可以告诉我你想了解的业务对象和时间范围。"
 
 
-def test_low_confidence_intent_conservatively_clarifies() -> None:
-    llm = FakeLLM(['{"intent":"data_query","confidence":0.4,"reason":"不确定"}', "请补充查询对象。"])
+def test_low_confidence_intent_uses_general_answer_without_database_access() -> None:
+    llm = FakeLLM(['{"intent":"data_query","confidence":0.4,"reason":"不确定"}', "可以告诉我你想了解的查询对象。"])
     graph = build_query_graph(
         database_executor=UnexpectedDatabaseAccess(),
         llm_client=llm,
@@ -143,6 +143,6 @@ def test_low_confidence_intent_conservatively_clarifies() -> None:
 
     state = graph.invoke(initial_state("帮我看一下情况"))
 
-    assert state["intent"] == QueryIntent.CLARIFICATION
+    assert state["intent"] == QueryIntent.GENERAL_CHAT
     assert state["intent_source"] == "llm"
     assert state["intent_classification_valid"] is False

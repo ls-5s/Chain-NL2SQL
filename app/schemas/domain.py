@@ -22,7 +22,6 @@ class QueryIntent(str, Enum):
 
     DATA_QUERY = "data_query"
     GENERAL_CHAT = "general_chat"
-    CLARIFICATION = "clarification"
 
 
 class ErrorCategory(str, Enum):

@@ -40,6 +40,15 @@ class DatabaseListResponse(BaseModel):
 class SessionResponse(BaseModel):
     authenticated: bool
     username: str | None = None
+    role: str | None = None
+
+
+class MemberResponse(BaseModel):
+    id: str
+    username: str
+    role: str
+    created_at: str
+    updated_at: str
 
 
 class ConversationSummary(BaseModel):

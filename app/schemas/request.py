@@ -18,6 +18,16 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=256)
 
 
+class MemberCreateRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=6, max_length=256)
+
+
+class MemberUpdateRequest(BaseModel):
+    username: str | None = Field(default=None, min_length=1, max_length=100)
+    password: str | None = Field(default=None, min_length=6, max_length=256)
+
+
 class ConversationCreateRequest(BaseModel):
     database_id: str = Field(min_length=1, max_length=100)
 
