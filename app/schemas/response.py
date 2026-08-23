@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from app.schemas.domain import ErrorCategory, QueryIntent, QueryResult, QueryStatus, TraceEvent
+from app.schemas.domain import AnswerSource, ErrorCategory, KnowledgeHit, QueryIntent, QueryResult, QueryStatus, TraceEvent
 
 
 class QueryResponse(BaseModel):
@@ -15,6 +15,7 @@ class QueryResponse(BaseModel):
     intent_confidence: float | None = None
     intent_reason: str | None = None
     intent_source: str | None = None
+    answer_source: AnswerSource | None = None
     status: QueryStatus
     iteration: int
     error_category: ErrorCategory | None = None
@@ -22,6 +23,21 @@ class QueryResponse(BaseModel):
     result: QueryResult | None = None
     generated_sql: str | None = None
     trace: list[TraceEvent] = Field(default_factory=list)
+    knowledge_hits: list[KnowledgeHit] = Field(default_factory=list)
+
+
+class KnowledgeDocumentResponse(BaseModel):
+    id: str
+    filename: str
+    file_type: str
+    size_bytes: int
+    category: str
+    status: str
+    created_at: str
+    updated_at: str = ""
+    chunk_count: int = 0
+    summary: str = ""
+    failure_message: str | None = None
 
 
 class HealthResponse(BaseModel):

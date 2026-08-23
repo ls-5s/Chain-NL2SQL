@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from langgraph.graph import END, StateGraph
 
@@ -16,9 +16,11 @@ from app.graph.intent_node import make_intent_gate_node
 from app.graph.state import NL2SQLState
 from app.graph.validation_node import make_validation_node
 from app.graph.repair_node import REPAIRABLE_ERRORS, make_repair_node
+from app.graph.result_guard_node import make_result_guard_node
+from app.graph.result_summary_node import make_result_summary_node
 from app.llm.client import LLMClient
 from app.rag.retriever import SchemaRetrievalError, SchemaRetrievalRequest, SchemaRetriever
-from app.schemas.domain import QueryIntent, QueryStatus, SchemaRetrieval, TraceEvent
+from app.schemas.domain import KnowledgeHit, QueryIntent, QueryStatus, SchemaRetrieval, TraceEvent
 
 
 def build_query_graph(
@@ -30,6 +32,11 @@ def build_query_graph(
     query_timeout_seconds: float,
     llm_timeout_seconds: float | None = None,
     intent_confidence_threshold: float = 0.75,
+    result_row_limit: int = 100,
+    result_summary_enabled: bool = True,
+    result_summary_max_chars: int = 12000,
+    knowledge_retriever: Callable[[str, int], list[KnowledgeHit]] | None = None,
+    knowledge_top_k: int = 5,
 ) -> Any:
     model_timeout_seconds = llm_timeout_seconds or query_timeout_seconds
     graph = StateGraph(NL2SQLState)
@@ -38,10 +45,25 @@ def build_query_graph(
     graph.add_node("generate_sql", make_generation_node(llm_client, model_timeout_seconds))
     graph.add_node("validate_sql", make_validation_node(access_policy))
     graph.add_node("execute_sql", make_execution_node(database_executor, access_policy, query_timeout_seconds))
+    graph.add_node("result_guard", make_result_guard_node(access_policy, result_row_limit))
+    graph.add_node(
+        "summarize_result",
+        make_result_summary_node(
+            llm_client,
+            model_timeout_seconds,
+            enabled=result_summary_enabled,
+            max_chars=result_summary_max_chars,
+        ),
+    )
     graph.add_node("repair_sql", make_repair_node(llm_client, model_timeout_seconds))
     graph.add_node("general_answer", make_general_answer_node(llm_client, model_timeout_seconds))
     graph.add_node("finalize", make_finalize_node())
-    graph.set_entry_point("intent_gate")
+    if knowledge_retriever is not None:
+        graph.add_node("retrieve_knowledge", _retrieve_knowledge_node(knowledge_retriever, knowledge_top_k))
+        graph.set_entry_point("retrieve_knowledge")
+        graph.add_edge("retrieve_knowledge", "intent_gate")
+    else:
+        graph.set_entry_point("intent_gate")
     graph.add_conditional_edges(
         "intent_gate",
         _route_after_intent,
@@ -60,12 +82,37 @@ def build_query_graph(
     graph.add_conditional_edges(
         "execute_sql",
         _route_after_execution,
-        {"repair": "repair_sql", "finalize": "finalize"},
+        {"repair": "repair_sql", "result_guard": "result_guard", "finalize": "finalize"},
     )
+    graph.add_conditional_edges(
+        "result_guard",
+        _route_after_result_guard,
+        {"summarize_result": "summarize_result", "finalize": "finalize"},
+    )
+    graph.add_edge("summarize_result", "finalize")
     graph.add_edge("repair_sql", "validate_sql")
     graph.add_edge("general_answer", "finalize")
     graph.add_edge("finalize", END)
     return graph.compile()
+
+
+def _retrieve_knowledge_node(retriever: Callable[[str, int], list[KnowledgeHit]], top_k: int):
+    def retrieve(state: NL2SQLState) -> dict[str, object]:
+        try:
+            hits = retriever(state["question"], top_k)
+            context = "\n\n".join(
+                f"文档：{hit.title}\n分类：{hit.category}\n片段：{hit.excerpt}" for hit in hits
+            )[:6000]
+            return {"knowledge_hits": hits, "knowledge_context": context, "knowledge_retrieval_error": None}
+        except Exception:
+            # Knowledge retrieval is an enhancement; schema and general-answer paths remain available.
+            return {
+                "knowledge_hits": [],
+                "knowledge_context": "",
+                "knowledge_retrieval_error": "knowledge_retrieval_error",
+            }
+
+    return retrieve
 
 
 def _route_after_intent(state: NL2SQLState) -> str:
@@ -89,7 +136,15 @@ def _route_after_execution(state: NL2SQLState) -> str:
         and state.get("iteration", 0) < state.get("max_iterations", 0)
     ):
         return "repair"
+    if status_value == QueryStatus.SUCCEEDED.value:
+        return "result_guard"
     return "finalize"
+
+
+def _route_after_result_guard(state: NL2SQLState) -> str:
+    status = state.get("status", QueryStatus.FAILED)
+    status_value = status.value if isinstance(status, QueryStatus) else str(status)
+    return "summarize_result" if status_value == QueryStatus.SUCCEEDED.value else "finalize"
 
 
 def _retrieve_schema_node(retriever: SchemaRetriever, access_policy: AccessPolicy):

@@ -351,7 +351,7 @@ def test_schema_index_manager_reaches_sql_prompt_for_chinese_query(tmp_path: Pat
     )
     assert state["status"] == "succeeded"
     assert "users" in state["retrieved_tables"]
-    assert "TABLE users" in llm.prompts[1 if len(llm.prompts) > 1 else 0].to_string()
+    assert any("TABLE users" in prompt.to_string() for prompt in llm.prompts)
     assert state["query_result"].rows == [[3]]
 
 
@@ -401,7 +401,7 @@ def test_repair_reuses_fixed_schema_and_retries_execution() -> None:
     assert state["status"] == "succeeded"
     assert state["query_result"].rows == [[2]]
     assert state["iteration"] == 2
-    assert len(llm.prompts) == 2
+    assert len(llm.prompts) == 3
     assert "TABLE users" in llm.prompts[1].to_string()
 
 

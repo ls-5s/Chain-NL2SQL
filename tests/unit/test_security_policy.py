@@ -57,6 +57,17 @@ def test_rejects_unapproved_column(policy: AccessPolicy) -> None:
     assert result.reason == "column_not_allowed"
 
 
+def test_rejects_projection_wildcard_with_field_policy(policy: AccessPolicy) -> None:
+    result = validate_readonly_sql("SELECT * FROM users", "sqlite", policy)
+    assert not result.allowed
+    assert result.reason == "column_not_allowed"
+
+
+def test_allows_count_wildcard_with_field_policy(policy: AccessPolicy) -> None:
+    result = validate_readonly_sql("SELECT COUNT(*) FROM users", "sqlite", policy)
+    assert result.allowed
+
+
 def test_empty_table_allowlist_denies_all_tables() -> None:
     policy = AccessPolicy(allowed_database_ids=frozenset({"mysql-db"}))
 

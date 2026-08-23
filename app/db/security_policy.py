@@ -71,6 +71,18 @@ def _column_allowed(column: exp.Column, tables: dict[str, str], policy: AccessPo
     )
 
 
+def _has_projection_wildcard(statement: exp.Expression) -> bool:
+    """Return whether a SELECT projection exposes an unexpanded wildcard."""
+
+    for select in _iter_nodes(statement, (exp.Select,)):
+        for projection in select.expressions:
+            if isinstance(projection, exp.Star):
+                return True
+            if isinstance(projection, exp.Column) and projection.is_star:
+                return True
+    return False
+
+
 def validate_readonly_sql(
     sql: str,
     dialect: str,
@@ -145,6 +157,11 @@ def validate_readonly_sql(
             return SQLValidationResult(False, "table_not_allowed")
 
     if access_policy and access_policy.allowed_columns:
+        # Field-level policies require explicit projections. COUNT(*) remains
+        # valid because its wildcard is an aggregate argument, not a column
+        # exposure; SELECT * and table.* are rejected fail-closed.
+        if _has_projection_wildcard(statement):
+            return SQLValidationResult(False, "column_not_allowed")
         for column in _iter_nodes(statement, (exp.Column,)):
             # 显式字段必须存在于服务端字段策略中。
             if not _column_allowed(column, tables, access_policy):

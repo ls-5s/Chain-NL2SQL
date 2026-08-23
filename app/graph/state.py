@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import NotRequired, TypedDict
 
-from app.schemas.domain import ErrorCategory, QueryIntent, QueryResult, QueryStatus, SchemaDocument, TraceEvent
+from app.schemas.domain import AnswerSource, ErrorCategory, KnowledgeHit, QueryIntent, QueryResult, QueryStatus, SchemaDocument, TraceEvent
 
 
 class NL2SQLState(TypedDict):
@@ -38,6 +38,10 @@ class NL2SQLState(TypedDict):
     safe_error: NotRequired[str | None]
     error_category: NotRequired[ErrorCategory | None]
     final_answer: NotRequired[str | None]
+    answer_source: NotRequired[AnswerSource | str | None]
+    knowledge_hits: NotRequired[list[KnowledgeHit]]
+    knowledge_context: NotRequired[str]
+    knowledge_retrieval_error: NotRequired[str | None]
 
 
 def create_initial_state(

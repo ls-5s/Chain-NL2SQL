@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from collections.abc import Callable
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 
 from app.api.auth import require_authenticated, require_super_admin
@@ -19,6 +19,7 @@ from app.db.sqlite_adapter import SQLiteAdapter
 from app.db.mysql_adapter import MySQLAdapter
 from app.graph.builder import build_query_graph
 from app.graph.state import NL2SQLState, create_initial_state
+from app.knowledge.service import KnowledgeBusyError, get_knowledge_store
 from app.llm.factory import LLMConfigurationError, create_openai_client
 from app.rag.index_manager import SchemaIndexManager
 from app.rag.reranker import SentenceTransformerReranker
@@ -39,6 +40,7 @@ from app.schemas.response import (
     DatabaseListResponse,
     DatabaseTableResponse,
     HealthResponse,
+    KnowledgeDocumentResponse,
     ResultReferenceResponse,
 )
 from app.errors.redactor import redact_error
@@ -248,6 +250,44 @@ def update_database_table_access(
     return next(item for item in registry.table_permissions(database_id) if item["table_name"] == actual_name)
 
 
+@api_router.get("/knowledge", response_model=list[KnowledgeDocumentResponse])
+def list_knowledge_documents(
+    settings: Settings = Depends(get_settings),
+    _: str = Depends(require_authenticated),
+) -> list[dict[str, Any]]:
+    return get_knowledge_store(settings).list()
+
+
+@api_router.post("/knowledge", response_model=KnowledgeDocumentResponse, status_code=status.HTTP_202_ACCEPTED)
+async def upload_knowledge_document(
+    file: UploadFile = File(...),
+    category: str = Form(default="未分类"),
+    settings: Settings = Depends(get_settings),
+    _: dict[str, Any] = Depends(require_super_admin),
+) -> dict[str, Any]:
+    content = await file.read(settings.knowledge_max_upload_bytes + 1)
+    try:
+        return get_knowledge_store(settings).create_upload(
+            file.filename or "未命名文档", content, category, file.content_type
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
+
+
+@api_router.delete("/knowledge/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_knowledge_document(
+    document_id: str,
+    settings: Settings = Depends(get_settings),
+    _: dict[str, Any] = Depends(require_super_admin),
+) -> None:
+    try:
+        get_knowledge_store(settings).delete(document_id)
+    except KeyError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="资料不存在。") from error
+    except KnowledgeBusyError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+
 def _safe_config(config: dict[str, Any]) -> dict[str, Any]:
     # Never echo a credential value through an admin API response.
     return {
@@ -350,6 +390,11 @@ async def query(
             access_policy=context.access_policy,
             query_timeout_seconds=settings.query_timeout_seconds,
             intent_confidence_threshold=settings.intent_confidence_threshold,
+            result_row_limit=settings.result_row_limit,
+            result_summary_enabled=settings.result_summary_enabled,
+            result_summary_max_chars=settings.result_summary_max_chars,
+            knowledge_retriever=get_knowledge_store(settings).retrieve,
+            knowledge_top_k=settings.knowledge_top_k,
         )
     except LLMConfigurationError as error:
         database.close()
@@ -521,6 +566,9 @@ async def _stream_graph(
                 if node == "retrieve_schema":
                     progress["retrieved_document_count"] = len(current_state.get("schema_context", []))
                     progress["retrieval_mode"] = current_state.get("retrieval_mode")
+                if node == "retrieve_knowledge":
+                    progress["retrieved_knowledge_count"] = len(current_state.get("knowledge_hits", []))
+                    progress["knowledge_available"] = not bool(current_state.get("knowledge_retrieval_error"))
                 if node == "intent_gate":
                     progress["intent"] = _json_value(current_state.get("intent"))
                     progress["classification_valid"] = current_state.get("intent_classification_valid", False)
@@ -537,6 +585,10 @@ async def _stream_graph(
                     progress["validated"] = bool(current_state.get("validated_sql"))
                 if node == "execute_sql" and current_state.get("query_result"):
                     progress["row_count"] = current_state["query_result"].row_count
+                if node == "result_guard":
+                    progress["guarded"] = current_state.get("status") == "succeeded"
+                if node == "summarize_result":
+                    progress["answer_source"] = _json_value(current_state.get("answer_source"))
                 if on_progress:
                     on_progress(progress)
                 yield _sse("progress", progress)
@@ -666,6 +718,11 @@ def _create_graph_runtime(settings: Settings, context: RequestContext, database_
             database_executor=database, llm_client=llm_client, schema_retriever=schema_retriever,
             access_policy=context.access_policy, query_timeout_seconds=settings.query_timeout_seconds,
             intent_confidence_threshold=settings.intent_confidence_threshold,
+            result_row_limit=settings.result_row_limit,
+            result_summary_enabled=settings.result_summary_enabled,
+            result_summary_max_chars=settings.result_summary_max_chars,
+            knowledge_retriever=get_knowledge_store(settings).retrieve,
+            knowledge_top_k=settings.knowledge_top_k,
         )
         return graph, database, record.dialect
     except Exception:
@@ -675,12 +732,15 @@ def _create_graph_runtime(settings: Settings, context: RequestContext, database_
 
 def _node_message(node: str) -> str:
     return {
+        "retrieve_knowledge": "正在检索知识资料",
         "intent_gate": "正在理解问题并判断处理方式",
         "retrieve_schema": "正在读取数据库 Schema",
         "generate_sql": "正在生成只读 SQL",
         "repair_sql": "正在根据执行错误修复 SQL",
         "validate_sql": "正在校验 SQL 安全性",
         "execute_sql": "正在执行查询",
+        "result_guard": "正在复核结果安全性",
+        "summarize_result": "正在生成结果摘要",
         "general_answer": "正在生成通用回答",
         "finalize": "正在整理查询结果",
     }.get(node, "正在处理查询")
@@ -702,6 +762,11 @@ def _node_explanation(node: str, state: dict[str, Any]) -> str:
         if state.get("retrieval_mode") == "authorized_full_schema":
             return f"关键词检索未命中，已使用服务端允许访问的全部 Schema，共获得 {count} 张表的结构信息。"
         return f"读取服务端允许访问的 Schema，共获得 {count} 张表的结构信息。"
+    if node == "retrieve_knowledge":
+        count = len(state.get("knowledge_hits", []))
+        if state.get("knowledge_retrieval_error"):
+            return "知识资料暂时不可用，将继续原有查询流程。"
+        return f"检索到 {count} 条相关知识资料，作为业务背景参考。"
     if node == "generate_sql":
         return "根据用户问题和固定 Schema 生成单条只读 SQL。"
     if node == "repair_sql":
@@ -715,6 +780,15 @@ def _node_explanation(node: str, state: dict[str, Any]) -> str:
         if result:
             return f"在超时和结果行数限制内执行 SQL，返回 {result.row_count} 行。"
         return "执行已验证的只读 SQL。"
+    if node == "result_guard":
+        if state.get("status") == "succeeded":
+            return "结果已再次通过字段脱敏、行数限制和输出结构复核。"
+        return "结果未通过安全复核，已阻止返回。"
+    if node == "summarize_result":
+        source = _json_value(state.get("answer_source"))
+        if source == "result_summary":
+            return "仅根据已复核的结构化结果生成自然语言摘要。"
+        return "摘要不可用，已保留安全结果并使用确定性回答。"
     if node == "general_answer":
         return "使用通用问答模型回答，不读取 Schema 或访问数据库。"
     if node == "clarify":

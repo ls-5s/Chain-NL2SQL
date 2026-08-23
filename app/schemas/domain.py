@@ -24,6 +24,14 @@ class QueryIntent(str, Enum):
     GENERAL_CHAT = "general_chat"
 
 
+class AnswerSource(str, Enum):
+    """Identifies how the user-facing answer text was produced."""
+
+    GENERAL_LLM = "general_llm"
+    RESULT_SUMMARY = "result_summary"
+    DETERMINISTIC_FALLBACK = "deterministic_fallback"
+
+
 class ErrorCategory(str, Enum):
     """可安全返回给调用方的稳定错误分类。"""
 
@@ -60,6 +68,16 @@ class TraceEvent(BaseModel):
     retrieved_document_count: int | None = None
     retrieval_mode: str | None = None
     retrieved_tables: list[str] | None = None
+
+
+class KnowledgeHit(BaseModel):
+    """A safe, short citation returned from the local knowledge store."""
+
+    document_id: str
+    title: str
+    category: str
+    excerpt: str
+    relevance: float
 
 
 class SchemaDocument(BaseModel):

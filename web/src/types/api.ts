@@ -2,6 +2,8 @@ export type QueryStatus = "running" | "succeeded" | "blocked" | "failed";
 
 export type QueryIntent = "data_query" | "general_chat";
 
+export type AnswerSource = "general_llm" | "result_summary" | "deterministic_fallback";
+
 export type ErrorCategory =
   | "syntax_error"
   | "unknown_column"
@@ -88,6 +90,7 @@ export interface QueryResponse {
   intent_confidence?: number | null;
   intent_reason?: string | null;
   intent_source?: "rule" | "llm" | null;
+  answer_source?: AnswerSource | null;
   status: QueryStatus;
   iteration: number;
   error_category?: ErrorCategory | null;
@@ -107,6 +110,8 @@ export interface QueryStreamEvent {
   message?: string;
   error_category?: ErrorCategory | null;
   retrieved_document_count?: number;
+  retrieved_knowledge_count?: number;
+  knowledge_available?: boolean;
   detail?: string;
   status_code?: number;
   explanation?: string;
@@ -114,6 +119,8 @@ export interface QueryStreamEvent {
   sql?: string;
   validated?: boolean;
   row_count?: number;
+  guarded?: boolean;
+  answer_source?: AnswerSource | null;
   retrieval_mode?: "vector" | "bm25" | "hybrid" | "full_schema";
   intent?: QueryIntent;
   classification_valid?: boolean;

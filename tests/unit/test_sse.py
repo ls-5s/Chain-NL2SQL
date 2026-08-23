@@ -59,7 +59,7 @@ def test_sse_data_path_emits_expected_events() -> None:
     database = SQLiteAdapter("demo", str(ROOT / "data" / "demo.sqlite"))
     graph = build_query_graph(
         database_executor=database,
-        llm_client=FakeLLM(["SELECT COUNT(*) AS count FROM users"]),
+        llm_client=FakeLLM(["SELECT COUNT(*) AS count FROM users", "用户数量为 3。"]),
         schema_retriever=SQLiteSchemaRetriever(database),
         access_policy=policy(),
         query_timeout_seconds=15,
@@ -67,9 +67,12 @@ def test_sse_data_path_emits_expected_events() -> None:
 
     result = events(run_stream(graph, state("查询用户数量"), database))
 
-    assert [name for name, _ in result] == ["start", "progress", "progress", "progress", "progress", "progress", "progress", "complete"]
+    assert [name for name, _ in result] == ["start", "progress", "progress", "progress", "progress", "progress", "progress", "progress", "progress", "complete"]
     assert result[1][1]["node"] == "intent_gate"
     assert result[1][1]["intent"] == "data_query"
+    assert [data["node"] for name, data in result if name == "progress"][-4:] == [
+        "execute_sql", "result_guard", "summarize_result", "finalize"
+    ]
     assert result[-1][1]["intent"] == "data_query"
 
 

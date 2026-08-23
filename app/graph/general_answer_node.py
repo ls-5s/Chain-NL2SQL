@@ -1,11 +1,11 @@
-"""General LLM response path that never reads database state."""
+"""General LLM response path with optional untrusted knowledge context."""
 
 from __future__ import annotations
 
 from app.graph.state import NL2SQLState
 from app.llm.client import LLMClient
 from app.llm.prompts import build_general_answer_prompt
-from app.schemas.domain import QueryStatus
+from app.schemas.domain import AnswerSource, QueryStatus
 
 
 def make_general_answer_node(llm_client: LLMClient, timeout_seconds: float):
@@ -13,9 +13,17 @@ def make_general_answer_node(llm_client: LLMClient, timeout_seconds: float):
 
     def answer(state: NL2SQLState) -> dict[str, object]:
         response = llm_client.generate(
-            prompt_template.invoke({"question": state["question"], "conversation_context": state.get("conversation_context", "")}),
+            prompt_template.invoke({
+                "question": state["question"],
+                "conversation_context": state.get("conversation_context", ""),
+                "knowledge_context": state.get("knowledge_context", ""),
+            }),
             timeout_seconds=timeout_seconds,
         )
-        return {"status": QueryStatus.SUCCEEDED, "final_answer": response.content.strip()}
+        return {
+            "status": QueryStatus.SUCCEEDED,
+            "final_answer": response.content.strip(),
+            "answer_source": AnswerSource.GENERAL_LLM,
+        }
 
     return answer

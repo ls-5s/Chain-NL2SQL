@@ -14,3 +14,6 @@ python-dotenv
 rank_bm25
 filelock
 sqlglot
+pypdf
+python-docx
+python-multipart

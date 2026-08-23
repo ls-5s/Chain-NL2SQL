@@ -83,6 +83,27 @@ def test_executes_with_masking_and_truncation(demo_db: Path, policy: AccessPolic
     assert result.truncated is True
 
 
+def test_result_guard_masks_sensitive_alias_after_execution(demo_db: Path, policy: AccessPolicy) -> None:
+    adapter = SQLiteAdapter("demo", str(demo_db))
+    result = adapter.execute_readonly(
+        "SELECT email AS contact FROM users ORDER BY id",
+        time.monotonic() + 5,
+        policy,
+    )
+    from app.db.result_guard import guard_query_result
+
+    guarded = guard_query_result(
+        sql="SELECT email AS contact FROM users ORDER BY id",
+        dialect="sqlite",
+        result=result,
+        access_policy=policy,
+        result_row_limit=100,
+    )
+    assert guarded.allowed
+    assert guarded.result is not None
+    assert all(row == ["***"] for row in guarded.result.rows)
+
+
 def test_binds_parameters_without_string_interpolation(
     demo_db: Path, policy: AccessPolicy
 ) -> None:

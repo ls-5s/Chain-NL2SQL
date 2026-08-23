@@ -6,6 +6,7 @@ import {
   CornerDownRight,
   ChevronDown,
   Database,
+  FileText,
   LoaderCircle,
   Plus,
 } from "lucide-vue-next";
@@ -292,6 +293,19 @@ async function scrollToBottom() {
                 <span>返回 {{ message.response.result?.row_count ?? 0 }} 行</span>
               </div>
             </div>
+
+            <details v-if="message.response?.knowledge_hits?.length" class="knowledge-hits" open>
+              <summary class="knowledge-hits__title">
+                <span><FileText :size="15" />知识命中</span>
+                <ChevronDown class="knowledge-hits__chevron" :size="16" aria-hidden="true" />
+              </summary>
+              <div class="knowledge-hits__list">
+                <article v-for="hit in message.response.knowledge_hits" :key="hit.document_id" class="knowledge-hit">
+                  <div class="knowledge-hit__meta"><strong>{{ hit.title }}</strong><span>{{ hit.category }}</span></div>
+                  <p>{{ hit.excerpt }}</p>
+                </article>
+              </div>
+            </details>
           </div>
         </article>
         <div v-if="loading" class="message-row message-row--assistant">
@@ -716,6 +730,37 @@ async function scrollToBottom() {
   background: #fff;
   text-align: left;
 }
+.knowledge-hits {
+  margin-top: 14px;
+  overflow: hidden;
+  border: 1px solid #e4e4e4;
+  border-radius: 9px;
+  background: #fff;
+  text-align: left;
+}
+.knowledge-hits__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 42px;
+  padding: 0 13px;
+  color: #4a4b49;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  list-style: none;
+}
+.knowledge-hits__title::-webkit-details-marker { display: none; }
+.knowledge-hits__title span { display: inline-flex; align-items: center; gap: 7px; }
+.knowledge-hits__chevron { transition: transform 150ms ease; }
+.knowledge-hits[open] .knowledge-hits__chevron { transform: rotate(180deg); }
+.knowledge-hits__list { display: grid; gap: 8px; padding: 0 13px 13px; }
+.knowledge-hit { border-top: 1px solid #f0f0ef; padding-top: 9px; }
+.knowledge-hit__meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.knowledge-hit__meta strong { overflow: hidden; color: #353634; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.knowledge-hit__meta span { flex: 0 0 auto; color: #8a8b87; font-size: 10px; }
+.knowledge-hit p { margin: 5px 0 0; color: #777875; font-size: 11px; line-height: 1.55; }
 .response-card__header,
 .response-card__footer {
   display: flex;

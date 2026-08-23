@@ -21,8 +21,8 @@ import { isAuthenticated, login } from "@/auth/auth";
 
 const router = useRouter();
 const route = useRoute();
-const username = ref("admin");
-const password = ref("123456");
+const username = ref(import.meta.env.VITE_DEMO_USERNAME ?? "");
+const password = ref(import.meta.env.VITE_DEMO_PASSWORD ?? "");
 const showPassword = ref(false);
 const submitting = ref(false);
 const errorMessage = ref("");

@@ -19,6 +19,7 @@ def make_generation_node(llm_client: LLMClient, timeout_seconds: float):
                 "schema_context": schema_context,
                 "question": state["question"],
                 "conversation_context": state.get("conversation_context", ""),
+                "knowledge_context": state.get("knowledge_context", ""),
             }),
             timeout_seconds=timeout_seconds,
         )

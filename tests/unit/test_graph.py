@@ -56,6 +56,7 @@ def test_data_intent_retrieves_schema_generates_and_executes_sql() -> None:
     adapter = SQLiteAdapter("demo", str(ROOT / "data" / "demo.sqlite"))
     llm = FakeLLM([
         "SELECT COUNT(*) AS count FROM users",
+        "用户数量为 3。",
     ])
     graph = build_query_graph(
         database_executor=adapter,
@@ -70,9 +71,29 @@ def test_data_intent_retrieves_schema_generates_and_executes_sql() -> None:
     assert state["intent"] == QueryIntent.DATA_QUERY
     assert state["status"] == "succeeded"
     assert state["query_result"].rows == [[3]]
-    assert state["final_answer"] == "查询完成，共返回 1 行结果。"
-    assert len(llm.prompts) == 1
+    assert state["final_answer"] == "用户数量为 3。"
+    assert len(llm.prompts) == 2
+    assert state["answer_source"] == "result_summary"
     assert state["intent_source"] == "rule"
+
+
+def test_result_summary_failure_keeps_safe_query_result() -> None:
+    adapter = SQLiteAdapter("demo", str(ROOT / "data" / "demo.sqlite"))
+    llm = FakeLLM(["SELECT COUNT(*) AS count FROM users", RuntimeError("summary unavailable")])
+    graph = build_query_graph(
+        database_executor=adapter,
+        llm_client=llm,
+        schema_retriever=SQLiteSchemaRetriever(adapter),
+        access_policy=policy(),
+        query_timeout_seconds=15,
+    )
+
+    state = graph.invoke(initial_state("查询用户数量"))
+
+    assert state["status"] == "succeeded"
+    assert state["query_result"].rows == [[3]]
+    assert state["final_answer"] == "查询完成，共返回 1 行结果。"
+    assert state["answer_source"] == "deterministic_fallback"
 
 
 @pytest.mark.parametrize("question", ["你好", "今天天气怎么样", "帮我写一封邮件"])

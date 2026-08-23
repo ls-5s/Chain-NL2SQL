@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.schemas.domain import ErrorCategory, QueryIntent, QueryStatus
+from app.schemas.domain import AnswerSource, ErrorCategory, QueryIntent, QueryStatus
 from app.schemas.response import QueryResponse
 
 
@@ -30,6 +30,7 @@ def map_query_state(state: dict[str, Any]) -> QueryResponse:
         intent_confidence=state.get("intent_confidence"),
         intent_reason=state.get("intent_reason"),
         intent_source=state.get("intent_source"),
+        answer_source=_answer_source(state.get("answer_source")),
         status=status,
         iteration=state.get("iteration", 0),
         error_category=category,
@@ -37,4 +38,16 @@ def map_query_state(state: dict[str, Any]) -> QueryResponse:
         result=state.get("query_result"),
         generated_sql=state.get("generated_sql"),
         trace=state.get("trace", []),
+        knowledge_hits=state.get("knowledge_hits", []),
     )
+
+
+def _answer_source(value: Any) -> AnswerSource | None:
+    if value is None:
+        return None
+    if isinstance(value, AnswerSource):
+        return value
+    try:
+        return AnswerSource(value)
+    except ValueError:
+        return None
