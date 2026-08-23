@@ -5,6 +5,7 @@ const api = vi.hoisted(() => ({
   fetchKnowledgeDocuments: vi.fn(),
   uploadKnowledgeDocument: vi.fn(),
   deleteKnowledgeDocument: vi.fn(),
+  updateKnowledgeACL: vi.fn(),
   ApiRequestError: class ApiRequestError extends Error {
     status?: number;
   },
@@ -28,6 +29,7 @@ const indexed = {
   chunk_count: 1,
   summary: "销售额口径",
   failure_message: null,
+  acl: { policy_type: "deny" as const, role: null, user_id: null },
 };
 
 describe("RagView", () => {
@@ -74,5 +76,24 @@ describe("RagView", () => {
     await flushPromises();
     expect(api.fetchKnowledgeDocuments).toHaveBeenCalledTimes(2);
     expect(wrapper.text()).toContain("已索引");
+  });
+
+  it("lets an administrator save a document ACL", async () => {
+    const updated = {
+      ...indexed,
+      acl: { policy_type: "all_authenticated" as const, role: null, user_id: null },
+    };
+    api.fetchKnowledgeDocuments.mockResolvedValue([indexed]);
+    api.updateKnowledgeACL.mockResolvedValue(updated);
+    const wrapper = mount(RagView);
+    await flushPromises();
+
+    await wrapper.get('[id="acl-policy-doc-1"]').setValue("all_authenticated");
+    await wrapper.get('[aria-label="保存访问范围"]').trigger("click");
+    await flushPromises();
+
+    expect(api.updateKnowledgeACL).toHaveBeenCalledWith("doc-1", {
+      policy_type: "all_authenticated",
+    });
   });
 });

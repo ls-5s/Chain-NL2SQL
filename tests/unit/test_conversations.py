@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+import sqlite3
 
 from app.conversations.repository import ConversationRepository
 from app.schemas.domain import QueryIntent, QueryResult, QueryStatus
@@ -82,3 +83,33 @@ def test_repository_recovers_running_turns_on_initialization(tmp_path) -> None:
     with recovered._connection() as connection:
         status = connection.execute("SELECT status FROM conversation_turns WHERE id = ?", (turn["turn_id"],)).fetchone()[0]
     assert status == "failed"
+
+
+def test_repository_migrates_legacy_required_database_binding(tmp_path) -> None:
+    path = tmp_path / "legacy.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE conversations (
+            id TEXT PRIMARY KEY, user_id TEXT NOT NULL, database_id TEXT NOT NULL,
+            title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE conversation_turns (
+            id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            sequence INTEGER NOT NULL, status TEXT NOT NULL, context_snapshot TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL, completed_at TEXT
+        );
+        INSERT INTO conversations VALUES ('legacy', 'single-user', 'demo', '旧会话', '2020', '2020');
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    repository = ConversationRepository(path)
+    created = repository.create_conversation("single-user")
+
+    assert created["database_id"] is None
+    assert repository.get_conversation("single-user", "legacy")["database_id"] == "demo"
+    with repository._connection() as connection:
+        database_column = next(row for row in connection.execute("PRAGMA table_info(conversations)") if row[1] == "database_id")
+    assert database_column[3] == 0

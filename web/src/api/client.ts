@@ -430,3 +430,15 @@ export async function deleteKnowledgeDocument(id: string): Promise<void> {
     throw toApiError(error);
   }
 }
+
+export async function updateKnowledgeACL(
+  id: string,
+  payload: { policy_type: "deny" | "all_authenticated" | "role" | "user"; role?: string; user_id?: string },
+): Promise<KnowledgeDocument> {
+  try {
+    const { data } = await client.patch<KnowledgeDocument>(`/knowledge/${id}/acl`, payload);
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}

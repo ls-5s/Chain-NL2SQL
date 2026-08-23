@@ -5,14 +5,16 @@ const api = vi.hoisted(() => ({
   fetchConversation: vi.fn(),
   createConversation: vi.fn(),
   deleteConversation: vi.fn(),
+  bindConversationDatabase: vi.fn(),
   streamConversationQuery: vi.fn(),
 }));
 
 vi.mock("@/api/client", () => api);
 
 import { createAgentConversationStore } from "@/composables/agentConversations";
+import type { ConversationSummary } from "@/types/api";
 
-const summary = { id: "c1", title: "新聊天", database_id: "demo", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z", message_count: 0 };
+const summary: ConversationSummary = { id: "c1", title: "新聊天", database_id: "demo", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z", message_count: 0 };
 const summary2 = { ...summary, id: "c2", title: "第二个会话" };
 const summary3 = { ...summary, id: "c3", title: "第三个会话" };
 
@@ -88,6 +90,23 @@ describe("agent conversations", () => {
     await store.createConversation("demo");
     expect(api.createConversation).toHaveBeenCalledWith("demo");
     expect(store.activeConversationId.value).toBe("c2");
+  });
+
+  it("binds a database after a clarification turn", async () => {
+    const unbound = { ...summary, database_id: null };
+    const clarification = [
+      { id: "m1", turn_id: "t1", role: "user", content: "查询用户数量", status: "succeeded", progress: [], created_at: "2026-01-01T00:00:00Z" },
+      { id: "m2", turn_id: "t1", role: "assistant", content: "请选择数据库", status: "needs_clarification", progress: [], created_at: "2026-01-01T00:00:01Z" },
+    ];
+    api.fetchConversations.mockResolvedValue([unbound]);
+    api.fetchConversation.mockResolvedValue(detail(clarification, unbound));
+    const store = createAgentConversationStore();
+    await store.initialize();
+
+    await store.setDatabaseId("demo");
+
+    expect(api.bindConversationDatabase).toHaveBeenCalledWith("c1", "demo");
+    expect(store.activeConversation.value.databaseId).toBe("demo");
   });
 
   it("clears busy state when creating a conversation fails", async () => {

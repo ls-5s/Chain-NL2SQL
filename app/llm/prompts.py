@@ -46,6 +46,15 @@ def build_general_answer_prompt() -> ChatPromptTemplate:
     ).partial(conversation_context="", knowledge_context="")
 
 
+def build_grounded_answer_prompt() -> ChatPromptTemplate:
+    return ChatPromptTemplate.from_messages(
+        [
+            ("system", "你只能依据授权证据回答，不得补充证据之外的事实。回答必须包含至少一个完整 document_id 引用。"),
+            ("human", "用户问题：{question}\n\n授权证据 JSON：\n{evidence_json}\n\n请给出简短回答并保留引用。"),
+        ]
+    )
+
+
 def build_sql_generation_prompt() -> ChatPromptTemplate:
     """构建首轮 SQL 生成 Prompt，不让模型直接获取数据库访问能力。"""
 

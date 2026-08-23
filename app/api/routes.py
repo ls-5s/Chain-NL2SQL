@@ -33,6 +33,7 @@ from app.schemas.request import (
     DatabaseUpdateRequest,
     QueryRequest,
     ResultReferenceRequest,
+    KnowledgeACLRequest,
 )
 from app.schemas.response import (
     ConversationDetail,
@@ -259,6 +260,26 @@ def list_knowledge_documents(
     return get_knowledge_store(settings).list()
 
 
+@api_router.patch("/knowledge/{document_id}/acl", response_model=KnowledgeDocumentResponse)
+def update_knowledge_acl(
+    document_id: str,
+    payload: KnowledgeACLRequest,
+    settings: Settings = Depends(get_settings),
+    _: dict[str, Any] = Depends(require_super_admin),
+) -> dict[str, Any]:
+    try:
+        store = get_knowledge_store(settings)
+        store.set_acl(document_id, payload.policy_type, role=payload.role, user_id=payload.user_id)
+        document = store.get(document_id)
+        if document is None:
+            raise KeyError(document_id)
+        return document
+    except KeyError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="资料不存在。") from error
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
+
+
 @api_router.post("/knowledge", response_model=KnowledgeDocumentResponse, status_code=status.HTTP_202_ACCEPTED)
 async def upload_knowledge_document(
     file: UploadFile = File(...),
@@ -370,6 +391,8 @@ async def query(
                 result_row_limit=settings.result_row_limit,
                 result_summary_enabled=settings.result_summary_enabled,
                 result_summary_max_chars=settings.result_summary_max_chars,
+                knowledge_retriever=_authorized_knowledge_retriever(settings, context),
+                knowledge_top_k=settings.knowledge_top_k,
             )
         elif not is_data:
             database = _NoopDatabase()
@@ -383,6 +406,8 @@ async def query(
                 result_row_limit=settings.result_row_limit,
                 result_summary_enabled=settings.result_summary_enabled,
                 result_summary_max_chars=settings.result_summary_max_chars,
+                knowledge_retriever=_authorized_knowledge_retriever(settings, context),
+                knowledge_top_k=settings.knowledge_top_k,
             )
         else:
             if payload.database_id not in context.access_policy.allowed_database_ids:
@@ -454,7 +479,12 @@ def bind_conversation_database(
         bound = _conversation_repository(get_settings()).bind_database(context.user_id, conversation_id, database_id)
     except ConversationNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation was not found.") from error
-    return {"bound": bound, "database_id": database_id}
+    if not bound:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A database has already been selected for this conversation.",
+        )
+    return {"bound": True, "database_id": database_id}
 
 
 @api_router.get("/conversations/{conversation_id}", response_model=ConversationDetail)
@@ -531,6 +561,8 @@ async def conversation_query(
                 result_row_limit=settings.result_row_limit,
                 result_summary_enabled=settings.result_summary_enabled,
                 result_summary_max_chars=settings.result_summary_max_chars,
+                knowledge_retriever=_authorized_knowledge_retriever(settings, context),
+                knowledge_top_k=settings.knowledge_top_k,
             )
             dialect = ""
         else:
@@ -742,6 +774,20 @@ def _safe_knowledge_retriever(settings: Settings):
         return None
 
 
+def _authorized_knowledge_retriever(settings: Settings, context: RequestContext):
+    try:
+        store = get_knowledge_store(settings)
+        return lambda question, top_k: store.retrieve(
+            question,
+            top_k,
+            user_id=context.user_id,
+            role=context.role,
+        )
+    except Exception as error:
+        logger.warning("Knowledge store unavailable: %s", type(error).__name__)
+        return None
+
+
 def _primary_key_columns(settings: Settings, database_id: str, table: str) -> tuple[str, ...]:
     record = get_database_registry(settings).get(database_id)
     if record is None:
@@ -796,7 +842,7 @@ def _create_graph_runtime(settings: Settings, context: RequestContext, database_
             result_row_limit=settings.result_row_limit,
             result_summary_enabled=settings.result_summary_enabled,
             result_summary_max_chars=settings.result_summary_max_chars,
-            knowledge_retriever=_safe_knowledge_retriever(settings),
+            knowledge_retriever=_authorized_knowledge_retriever(settings, context),
             knowledge_top_k=settings.knowledge_top_k,
         )
         return graph, database, record.dialect

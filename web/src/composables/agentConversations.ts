@@ -202,11 +202,11 @@ export function createAgentConversationStore(): AgentConversationStore {
   }
 
   async function setDatabaseId(databaseId: string) {
-    if (activeDetail.value?.messages.length) return;
-    if (activeDetail.value) {
-      await bindConversationDatabase(activeDetail.value.id, databaseId);
-      activeDetail.value.database_id = databaseId;
-    }
+    // A clarification can be persisted before a user chooses a database.
+    // The API remains the authority for the one-time binding.
+    if (!activeDetail.value || activeDetail.value.database_id !== null) return;
+    await bindConversationDatabase(activeDetail.value.id, databaseId);
+    activeDetail.value.database_id = databaseId;
   }
 
   async function sendQuestion(

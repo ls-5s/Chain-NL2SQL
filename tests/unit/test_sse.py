@@ -93,11 +93,11 @@ def test_sse_general_path_skips_database_nodes() -> None:
     assert result[-1][1]["intent"] == "general_chat"
 
 
-def test_sse_ambiguous_path_uses_general_answer_and_skips_database_nodes() -> None:
+def test_sse_ambiguous_path_returns_clarification_and_skips_database_nodes() -> None:
     database = SQLiteAdapter("demo", str(ROOT / "data" / "demo.sqlite"))
     graph = build_query_graph(
         database_executor=database,
-        llm_client=FakeLLM(["可以告诉我你想查询的时间范围。"]),
+        llm_client=FakeLLM([]),
         schema_retriever=SQLiteSchemaRetriever(database),
         access_policy=policy(),
         query_timeout_seconds=15,
@@ -106,8 +106,8 @@ def test_sse_ambiguous_path_uses_general_answer_and_skips_database_nodes() -> No
     result = events(run_stream(graph, state("帮我看看数据"), database))
     nodes = [data.get("node") for name, data in result if name == "progress"]
 
-    assert nodes == ["intent_gate", "general_answer", "finalize"]
-    assert result[-1][1]["intent"] == "general_chat"
+    assert nodes == ["intent_gate", "clarification_answer", "finalize"]
+    assert result[-1][1]["intent"] == "clarify"
 
 
 def test_sse_model_failure_emits_error_event() -> None:

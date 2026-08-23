@@ -28,6 +28,12 @@ class QueryResponse(BaseModel):
     required_actions: list[str] = Field(default_factory=list)
 
 
+class KnowledgeACLResponse(BaseModel):
+    policy_type: str
+    role: str | None = None
+    user_id: str | None = None
+
+
 class KnowledgeDocumentResponse(BaseModel):
     id: str
     filename: str
@@ -40,6 +46,7 @@ class KnowledgeDocumentResponse(BaseModel):
     chunk_count: int = 0
     summary: str = ""
     failure_message: str | None = None
+    acl: KnowledgeACLResponse | None = None
 
 
 class HealthResponse(BaseModel):

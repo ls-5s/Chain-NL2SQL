@@ -12,6 +12,7 @@ from app.graph.execution_node import make_execution_node
 from app.graph.finalize_node import make_finalize_node
 from app.graph.clarification_node import make_clarification_node
 from app.graph.general_answer_node import make_general_answer_node
+from app.graph.grounded_answer_node import make_grounded_answer_node
 from app.graph.generation_node import make_generation_node
 from app.graph.intent_node import make_intent_gate_node
 from app.graph.state import NL2SQLState
@@ -58,6 +59,8 @@ def build_query_graph(
     )
     graph.add_node("repair_sql", make_repair_node(llm_client, model_timeout_seconds))
     graph.add_node("general_answer", make_general_answer_node(llm_client, model_timeout_seconds))
+    graph.add_node("retrieve_knowledge", _retrieve_knowledge_node(knowledge_retriever, knowledge_top_k))
+    graph.add_node("grounded_answer", make_grounded_answer_node(llm_client, model_timeout_seconds))
     graph.add_node("finalize", make_finalize_node())
     graph.add_node("clarification_answer", make_clarification_node())
     # Knowledge retrieval is deliberately outside the V1 agent graph.  An
@@ -69,6 +72,7 @@ def build_query_graph(
         {
             QueryIntent.DATA_QUERY.value: "retrieve_schema",
             QueryIntent.GENERAL_CHAT.value: "general_answer",
+            "grounded_chat": "retrieve_knowledge",
             QueryIntent.CLARIFY.value: "clarification_answer",
             "needs_database": "clarification_answer",
         },
@@ -93,13 +97,17 @@ def build_query_graph(
     graph.add_edge("summarize_result", "finalize")
     graph.add_edge("repair_sql", "validate_sql")
     graph.add_edge("general_answer", "finalize")
+    graph.add_edge("retrieve_knowledge", "grounded_answer")
+    graph.add_edge("grounded_answer", "finalize")
     graph.add_edge("clarification_answer", "finalize")
     graph.add_edge("finalize", END)
     return graph.compile()
 
 
-def _retrieve_knowledge_node(retriever: Callable[[str, int], list[KnowledgeHit]], top_k: int):
+def _retrieve_knowledge_node(retriever: Callable[[str, int], list[KnowledgeHit]] | None, top_k: int):
     def retrieve(state: NL2SQLState) -> dict[str, object]:
+        if retriever is None:
+            return {"knowledge_hits": [], "knowledge_context": "", "knowledge_retrieval_error": "knowledge_unavailable"}
         try:
             hits = retriever(state["question"], top_k)
             context = "\n\n".join(
@@ -123,6 +131,8 @@ def _route_after_intent(state: NL2SQLState) -> str:
         state["clarification_fields"] = ["数据库"]
         state["required_actions"] = ["select_database"]
         return "needs_database"
+    if intent == QueryIntent.GENERAL_CHAT and state.get("knowledge_policy") == "required":
+        return "grounded_chat"
     return intent.value if isinstance(intent, QueryIntent) else str(intent)
 
 

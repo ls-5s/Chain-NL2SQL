@@ -79,8 +79,6 @@ watch(
 onMounted(async () => {
   try {
     databases.value = await fetchDatabases();
-    if (databases.value.length && (!databaseId.value || !databases.value.includes(databaseId.value)))
-      databaseId.value = databases.value[0];
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "无法加载数据库列表");
   }
@@ -124,9 +122,14 @@ function handleSubmit() {
   void askQuestion();
 }
 
-function handleDatabaseChange(event: Event) {
+async function handleDatabaseChange(event: Event) {
   const value = (event.target as HTMLSelectElement).value;
-  if (value) databaseId.value = value;
+  if (!value) return;
+  try {
+    await store.setDatabaseId(value);
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "无法绑定数据库");
+  }
 }
 
 function statusLabel(status: QueryStatus) {

@@ -110,8 +110,50 @@ class ConversationRepository:
                 except sqlite3.OperationalError:
                     pass
             connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_turn_request ON conversation_turns(conversation_id, client_request_id) WHERE client_request_id IS NOT NULL")
+            self._migrate_nullable_database_id(connection)
             connection.execute("INSERT OR REPLACE INTO conversation_meta(key, value) VALUES ('schema_version', '1')")
             self._recover_running_turns(connection)
+
+    @staticmethod
+    def _migrate_nullable_database_id(connection: sqlite3.Connection) -> None:
+        """Migrate V1 databases whose conversation database binding was mandatory.
+
+        SQLite cannot alter a column's nullability in place.  Create the replacement
+        table before dropping the old one so child-table foreign keys continue to
+        reference ``conversations`` when the replacement is renamed.
+        """
+
+        database_column = connection.execute("PRAGMA table_info(conversations)").fetchone()
+        columns = connection.execute("PRAGMA table_info(conversations)").fetchall()
+        if not database_column or not any(row[1] == "database_id" and row[3] for row in columns):
+            return
+
+        connection.commit()
+        connection.execute("PRAGMA foreign_keys = OFF")
+        try:
+            connection.execute(
+                """CREATE TABLE conversations_new (
+                    id TEXT PRIMARY KEY, user_id TEXT NOT NULL, database_id TEXT,
+                    title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                    database_version INTEGER NOT NULL DEFAULT 0,
+                    pending_clarification_json TEXT
+                )"""
+            )
+            connection.execute(
+                """INSERT INTO conversations_new(
+                    id, user_id, database_id, title, created_at, updated_at,
+                    database_version, pending_clarification_json
+                )
+                SELECT id, user_id, database_id, title, created_at, updated_at,
+                       COALESCE(database_version, 0), pending_clarification_json
+                FROM conversations"""
+            )
+            connection.execute("DROP TABLE conversations")
+            connection.execute("ALTER TABLE conversations_new RENAME TO conversations")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(user_id, updated_at DESC)")
+            connection.commit()
+        finally:
+            connection.execute("PRAGMA foreign_keys = ON")
 
     def _recover_running_turns(self, connection: sqlite3.Connection) -> None:
         """Close turns left running when the process or client disappeared."""

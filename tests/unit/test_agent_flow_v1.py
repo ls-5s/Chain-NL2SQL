@@ -144,3 +144,24 @@ def test_conversation_idempotency_and_single_database_bind(tmp_path) -> None:
     with ThreadPoolExecutor(max_workers=2) as executor:
         outcomes = list(executor.map(bind, ["demo", "other"]))
     assert sum(outcomes) == 1
+
+
+def test_conversation_database_bind_api_rejects_second_binding(monkeypatch, tmp_path) -> None:
+    from fastapi.testclient import TestClient
+
+    from app.api import auth, routes
+    from app.config.settings import get_settings
+    from app.main import create_app
+
+    monkeypatch.setenv("CONVERSATION_DATABASE_PATH", str(tmp_path / "conversation.sqlite3"))
+    monkeypatch.setenv("APP_AUTH_USERNAME", "admin")
+    monkeypatch.setenv("APP_AUTH_PASSWORD", "123456")
+    get_settings.cache_clear()
+    auth._repositories.clear()
+    routes._conversation_repositories.clear()
+    client = TestClient(create_app())
+    assert client.post("/api/v1/auth/login", json={"username": "admin", "password": "123456"}).status_code == 200
+    conversation = client.post("/api/v1/conversations", json={"database_id": None}).json()
+
+    assert client.post(f"/api/v1/conversations/{conversation['id']}/database", json={"database_id": "demo"}).status_code == 200
+    assert client.post(f"/api/v1/conversations/{conversation['id']}/database", json={"database_id": "demo"}).status_code == 409

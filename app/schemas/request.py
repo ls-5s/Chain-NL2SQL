@@ -44,6 +44,12 @@ class ResultReferenceRequest(BaseModel):
     row_index: int = Field(ge=0, le=99)
 
 
+class KnowledgeACLRequest(BaseModel):
+    policy_type: str = Field(pattern="^(deny|all_authenticated|role|user)$")
+    role: str | None = Field(default=None, max_length=64)
+    user_id: str | None = Field(default=None, max_length=128)
+
+
 class DatabaseCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     dialect: str = Field(pattern="^(sqlite|mysql)$")

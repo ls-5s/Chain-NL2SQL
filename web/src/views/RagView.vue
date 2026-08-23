@@ -6,6 +6,7 @@ import {
   LoaderCircle,
   RefreshCw,
   Search,
+  ShieldCheck,
   Trash2,
   TriangleAlert,
   UploadCloud,
@@ -15,11 +16,15 @@ import {
   ApiRequestError,
   deleteKnowledgeDocument,
   fetchKnowledgeDocuments,
+  updateKnowledgeACL,
   uploadKnowledgeDocument,
 } from "@/api/client";
 import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import { getDemoRole } from "@/auth/auth";
 import type { KnowledgeDocument, KnowledgeDocumentStatus } from "@/types/api";
+
+type ACLPolicyType = "deny" | "all_authenticated" | "role" | "user";
+type ACLDraft = { policyType: ACLPolicyType; role: string; userId: string };
 
 const documents = ref<KnowledgeDocument[]>([]);
 const loading = ref(true);
@@ -32,6 +37,9 @@ const categoryFilter = ref("all");
 const uploadOpen = ref(false);
 const deleteTarget = ref<KnowledgeDocument | null>(null);
 const selectedFile = ref<File | null>(null);
+const aclDrafts = ref<Record<string, ACLDraft>>({});
+const aclSavingId = ref<string | null>(null);
+const aclErrors = ref<Record<string, string>>({});
 const category = ref("业务规则");
 const fileInput = ref<HTMLInputElement | null>(null);
 let pollTimer: number | undefined;
@@ -68,12 +76,68 @@ const failedCount = computed(
 function setError(error: unknown, fallback: string) {
   errorMessage.value = error instanceof ApiRequestError ? error.message : fallback;
 }
+function defaultAcl(document: KnowledgeDocument): ACLDraft {
+  return {
+    policyType: document.acl?.policy_type ?? "deny",
+    role: document.acl?.role ?? "",
+    userId: document.acl?.user_id ?? "",
+  };
+}
+function syncAclDrafts(items: KnowledgeDocument[]) {
+  const next = { ...aclDrafts.value };
+  for (const document of items) next[document.id] ??= defaultAcl(document);
+  aclDrafts.value = next;
+}
+function aclDraft(document: KnowledgeDocument): ACLDraft {
+  return aclDrafts.value[document.id] ?? defaultAcl(document);
+}
+function updateAclDraft(document: KnowledgeDocument, key: keyof ACLDraft, value: string) {
+  aclDrafts.value = {
+    ...aclDrafts.value,
+    [document.id]: { ...aclDraft(document), [key]: value },
+  };
+  if (aclErrors.value[document.id]) {
+    const nextErrors = { ...aclErrors.value };
+    delete nextErrors[document.id];
+    aclErrors.value = nextErrors;
+  }
+}
+async function saveAcl(document: KnowledgeDocument) {
+  const draft = aclDraft(document);
+  if (draft.policyType === "role" && !draft.role.trim()) {
+    aclErrors.value = { ...aclErrors.value, [document.id]: "请填写允许访问的角色。" };
+    return;
+  }
+  if (draft.policyType === "user" && !draft.userId.trim()) {
+    aclErrors.value = { ...aclErrors.value, [document.id]: "请填写允许访问的用户 ID。" };
+    return;
+  }
+  aclSavingId.value = document.id;
+  aclErrors.value = { ...aclErrors.value, [document.id]: "" };
+  try {
+    const updated = await updateKnowledgeACL(document.id, {
+      policy_type: draft.policyType,
+      ...(draft.policyType === "role" ? { role: draft.role.trim() } : {}),
+      ...(draft.policyType === "user" ? { user_id: draft.userId.trim() } : {}),
+    });
+    documents.value = documents.value.map((item) => (item.id === updated.id ? updated : item));
+    aclDrafts.value = { ...aclDrafts.value, [updated.id]: defaultAcl(updated) };
+  } catch (error) {
+    aclErrors.value = {
+      ...aclErrors.value,
+      [document.id]: error instanceof ApiRequestError ? error.message : "访问策略保存失败。",
+    };
+  } finally {
+    aclSavingId.value = null;
+  }
+}
 async function loadDocuments(silent = false) {
   if (silent) refreshing.value = true;
   else loading.value = true;
   errorMessage.value = "";
   try {
     documents.value = await fetchKnowledgeDocuments();
+    syncAclDrafts(documents.value);
   } catch (error) {
     setError(error, "资料库加载失败。");
   } finally {
@@ -134,6 +198,7 @@ async function saveUpload() {
       category.value.trim() || "未分类",
     );
     documents.value = [document, ...documents.value.filter((item) => item.id !== document.id)];
+    syncAclDrafts(documents.value);
     uploadOpen.value = false;
     syncPolling();
   } catch (error) {
@@ -274,6 +339,51 @@ onBeforeUnmount(() => {
             >
             <div v-if="document.failure_message" class="failure-message">
               <TriangleAlert :size="14" />{{ document.failure_message }}
+            </div>
+            <div v-if="isAdmin" class="document-acl">
+              <ShieldCheck :size="15" aria-hidden="true" />
+              <label :for="`acl-policy-${document.id}`">访问范围</label>
+              <select
+                :id="`acl-policy-${document.id}`"
+                :value="aclDraft(document).policyType"
+                :disabled="aclSavingId === document.id"
+                @change="updateAclDraft(document, 'policyType', ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="deny">禁止访问</option>
+                <option value="all_authenticated">所有已登录用户</option>
+                <option value="role">指定角色</option>
+                <option value="user">指定用户</option>
+              </select>
+              <input
+                v-if="aclDraft(document).policyType === 'role'"
+                :value="aclDraft(document).role"
+                :disabled="aclSavingId === document.id"
+                maxlength="64"
+                placeholder="角色"
+                aria-label="允许访问的角色"
+                @input="updateAclDraft(document, 'role', ($event.target as HTMLInputElement).value)"
+              />
+              <input
+                v-if="aclDraft(document).policyType === 'user'"
+                :value="aclDraft(document).userId"
+                :disabled="aclSavingId === document.id"
+                maxlength="128"
+                placeholder="用户 ID"
+                aria-label="允许访问的用户 ID"
+                @input="updateAclDraft(document, 'userId', ($event.target as HTMLInputElement).value)"
+              />
+              <button
+                class="icon-button document-acl__save"
+                type="button"
+                title="保存访问范围"
+                aria-label="保存访问范围"
+                :disabled="aclSavingId === document.id"
+                @click="saveAcl(document)"
+              >
+                <LoaderCircle v-if="aclSavingId === document.id" class="spin" :size="16" />
+                <CheckCircle2 v-else :size="16" />
+              </button>
+              <span v-if="aclErrors[document.id]" class="document-acl__error" role="alert">{{ aclErrors[document.id] }}</span>
             </div>
           </div>
           <span :class="['status-badge', `status-badge--${document.status}`]"
@@ -621,6 +731,42 @@ h2 {
   margin-top: 8px;
   color: #a24a4a;
   font-size: 11px;
+}
+.document-acl {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin-top: 11px;
+  color: #67766c;
+  font-size: 11px;
+}
+.document-acl label {
+  font-weight: 700;
+}
+.document-acl select,
+.document-acl input {
+  height: 29px;
+  min-width: 0;
+  border: 1px solid #d9e2db;
+  border-radius: 5px;
+  padding: 0 7px;
+  color: #405047;
+  background: #fff;
+  font: inherit;
+}
+.document-acl input {
+  width: min(160px, 100%);
+}
+.document-acl__save {
+  width: 29px;
+  height: 29px;
+  color: #397453;
+  background: #e8f4eb;
+}
+.document-acl__error {
+  width: 100%;
+  color: #a24a4a;
 }
 .icon-button {
   display: inline-grid;

@@ -234,6 +234,7 @@ export interface KnowledgeDocument {
   chunk_count?: number;
   summary: string;
   failure_message?: string;
+  acl?: { policy_type: "deny" | "all_authenticated" | "role" | "user"; role?: string | null; user_id?: string | null } | null;
 }
 
 export interface KnowledgeUploadResult {

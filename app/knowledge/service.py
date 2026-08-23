@@ -114,9 +114,20 @@ class KnowledgeStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS knowledge_document_acl (
+                    document_id TEXT PRIMARY KEY REFERENCES knowledge_documents(id) ON DELETE CASCADE,
+                    policy_type TEXT NOT NULL CHECK(policy_type IN ('deny', 'all_authenticated', 'role', 'user')),
+                    role TEXT,
+                    user_id TEXT,
+                    updated_at TEXT NOT NULL
+                );
                 CREATE INDEX IF NOT EXISTS idx_knowledge_documents_status ON knowledge_documents(status);
                 CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_document ON knowledge_chunks(document_id, ordinal);
                 """
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO knowledge_document_acl(document_id, policy_type, updated_at) "
+                "SELECT id, 'deny', updated_at FROM knowledge_documents"
             )
             try:
                 connection.execute(
@@ -204,6 +215,10 @@ class KnowledgeStore:
                     (id, document_id, status, created_at, updated_at) VALUES (?, ?, 'queued', ?, ?)""",
                     (str(uuid4()), document_id, now, now),
                 )
+                connection.execute(
+                    "INSERT INTO knowledge_document_acl(document_id, policy_type, updated_at) VALUES (?, 'deny', ?)",
+                    (document_id, now),
+                )
         except Exception:
             path.unlink(missing_ok=True)
             raise
@@ -229,7 +244,12 @@ class KnowledgeStore:
                 "SELECT id, filename, file_type, size_bytes, category, status, created_at, updated_at, "
                 "chunk_count, summary, failure_message FROM knowledge_documents ORDER BY created_at DESC"
             ).fetchall()
-        return [dict(row) for row in rows]
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["acl"] = self.get_acl(item["id"])
+            result.append(item)
+        return result
 
     def get(self, document_id: str) -> dict[str, Any] | None:
         with self._connection() as connection:
@@ -238,7 +258,49 @@ class KnowledgeStore:
                 "chunk_count, summary, failure_message FROM knowledge_documents WHERE id = ?",
                 (document_id,),
             ).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        result = dict(row)
+        result["acl"] = self.get_acl(document_id)
+        return result
+
+    def get_acl(self, document_id: str) -> dict[str, object]:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT policy_type, role, user_id, updated_at FROM knowledge_document_acl WHERE document_id = ?",
+                (document_id,),
+            ).fetchone()
+        return dict(row) if row else {"policy_type": "deny", "role": None, "user_id": None, "updated_at": ""}
+
+    def set_acl(self, document_id: str, policy_type: str, *, role: str | None = None, user_id: str | None = None) -> dict[str, object]:
+        if policy_type not in {"deny", "all_authenticated", "role", "user"}:
+            raise ValueError("ACL 策略无效。")
+        if policy_type == "role" and not role:
+            raise ValueError("role 策略必须提供角色。")
+        if policy_type == "user" and not user_id:
+            raise ValueError("user 策略必须提供用户。")
+        now = _now()
+        with self._connection() as connection:
+            if not connection.execute("SELECT 1 FROM knowledge_documents WHERE id = ?", (document_id,)).fetchone():
+                raise KeyError(document_id)
+            connection.execute(
+                "INSERT INTO knowledge_document_acl(document_id, policy_type, role, user_id, updated_at) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(document_id) DO UPDATE SET policy_type=excluded.policy_type, role=excluded.role, user_id=excluded.user_id, updated_at=excluded.updated_at",
+                (document_id, policy_type, role, user_id, now),
+            )
+        return self.get_acl(document_id)
+
+    def _authorized(self, document_id: str, user_id: str | None, role: str | None, connection: sqlite3.Connection) -> bool:
+        if user_id is None:
+            return True
+        row = connection.execute("SELECT policy_type, role, user_id FROM knowledge_document_acl WHERE document_id = ?", (document_id,)).fetchone()
+        if not row or row["policy_type"] == "deny":
+            return False
+        if row["policy_type"] == "all_authenticated":
+            return True
+        if row["policy_type"] == "role":
+            return bool(role and role == row["role"])
+        return user_id == row["user_id"]
 
     def delete(self, document_id: str) -> None:
         with self._connection() as connection:
@@ -260,7 +322,7 @@ class KnowledgeStore:
         except OSError:
             pass
 
-    def retrieve(self, question: str, top_k: int | None = None) -> list[KnowledgeHit]:
+    def retrieve(self, question: str, top_k: int | None = None, *, user_id: str | None = None, role: str | None = None) -> list[KnowledgeHit]:
         limit = max(1, top_k or self.top_k)
         if not question.strip():
             return []
@@ -292,21 +354,24 @@ class KnowledgeStore:
         scored.sort(key=lambda item: (-item[0], item[1]["filename"], item[1]["id"]))
         hits: list[KnowledgeHit] = []
         seen: set[str] = set()
-        for score, row in scored:
-            if row["document_id"] in seen:
-                continue
-            seen.add(row["document_id"])
-            hits.append(
-                KnowledgeHit(
-                    document_id=row["document_id"],
-                    title=row["filename"],
-                    category=row["category"],
-                    excerpt=_excerpt(row["content"]),
-                    relevance=round(min(1.0, score), 4),
+        with self._connection() as acl_connection:
+            for score, row in scored:
+                if not self._authorized(row["document_id"], user_id, role, acl_connection):
+                    continue
+                if row["document_id"] in seen:
+                    continue
+                seen.add(row["document_id"])
+                hits.append(
+                    KnowledgeHit(
+                        document_id=row["document_id"],
+                        title=row["filename"],
+                        category=row["category"],
+                        excerpt=_excerpt(row["content"]),
+                        relevance=round(min(1.0, score), 4),
+                    )
                 )
-            )
-            if len(hits) >= limit:
-                break
+                if len(hits) >= limit:
+                    break
         return hits
 
     @staticmethod
@@ -409,7 +474,10 @@ class KnowledgeStore:
     def _fail_job(self, job_id: str, error: str) -> None:
         message = error[:500] or "文档解析失败。"
         with self._connection() as connection:
-            row = connection.execute("SELECT document_id, attempts FROM knowledge_jobs WHERE id = ?", (job_id,)).fetchone()
+            row = connection.execute(
+                "SELECT j.document_id, j.attempts, d.status AS document_status FROM knowledge_jobs j JOIN knowledge_documents d ON d.id = j.document_id WHERE j.id = ?",
+                (job_id,),
+            ).fetchone()
             if not row:
                 return
             final = row["attempts"] >= 3
@@ -419,9 +487,15 @@ class KnowledgeStore:
                 "UPDATE knowledge_jobs SET status = ?, locked_at = NULL, error = ?, updated_at = ? WHERE id = ?",
                 (status, message, now, job_id),
             )
+            retained_index = bool(
+                connection.execute(
+                    "SELECT 1 FROM knowledge_chunks WHERE document_id = ? LIMIT 1",
+                    (row["document_id"],),
+                ).fetchone()
+            )
             connection.execute(
                 "UPDATE knowledge_documents SET status = ?, updated_at = ?, failure_message = ? WHERE id = ?",
-                ("failed" if final else "uploading", now, message, row["document_id"]),
+                ("indexed" if retained_index else ("failed" if final else "uploading"), now, message, row["document_id"]),
             )
         if not final:
             with self._lock:
