@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { useRouter } from "vue-router";
 import {
   CircleHelp,
   Database,
@@ -17,7 +17,6 @@ import AccountMenu from "@/components/AccountMenu.vue";
 import { getDemoUsername, logout } from "@/auth/auth";
 
 const router = useRouter();
-const route = useRoute();
 const currentUser = getDemoUsername();
 const mobileNavigation = ref<HTMLDialogElement | null>(null);
 const profileMenuOpen = ref(false);
@@ -57,7 +56,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleAgentShortcut)
 </script>
 
 <template>
-  <div class="app-shell" :class="{ 'app-shell--database': route.path === '/databases' }">
+  <div class="app-shell">
     <header class="app-header">
       <div class="brand-lockup">
         <span class="brand-mark"><Database :size="18" :stroke-width="2" aria-hidden="true" /></span>
@@ -658,12 +657,4 @@ kbd {
   }
 }
 
-/* The database view has its own GPT-style sidebar and does not need the global icon rail. */
-.app-shell--database .rail {
-  display: none;
-}
-
-.app-shell--database .app-main {
-  margin-left: 0;
-}
 </style>

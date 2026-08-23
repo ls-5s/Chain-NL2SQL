@@ -14,12 +14,7 @@ import {
 import { createResultReference, fetchDatabases } from "@/api/client";
 import { useAgentConversationStore } from "@/composables/agentConversations";
 import { renderMarkdown } from "@/utils/markdown";
-import type {
-  QueryIntent,
-  QueryResponse,
-  QueryResult,
-  QueryStatus,
-} from "@/types/api";
+import type { QueryIntent, QueryResponse, QueryResult, QueryStatus } from "@/types/api";
 
 const databases = ref<string[]>([]);
 const conversation = ref<HTMLElement | null>(null);
@@ -29,10 +24,19 @@ const agentStep = ref("正在准备查询");
 const referenceIds = ref<string[]>([]);
 const store = useAgentConversationStore();
 const messages = computed(() => store.activeConversation.value.messages);
-const question = computed({ get: () => store.activeConversation.value.draft, set: (value: string) => store.setDraft(value) });
-const databaseId = computed({ get: () => store.activeConversation.value.databaseId, set: (value: string) => store.setDatabaseId(value) });
+const question = computed({
+  get: () => store.activeConversation.value.draft,
+  set: (value: string) => store.setDraft(value),
+});
+const databaseId = computed({
+  get: () => store.activeConversation.value.databaseId,
+  set: (value: string) => store.setDatabaseId(value),
+});
 const loading = computed(() => store.isBusy.value);
-const canSubmit = computed(() => question.value.trim().length > 0 && !loading.value && Boolean(store.activeConversationId.value));
+const canSubmit = computed(
+  () =>
+    question.value.trim().length > 0 && !loading.value && Boolean(store.activeConversationId.value),
+);
 
 async function resizeQuestionInput(input: HTMLTextAreaElement | null) {
   if (!input) return;
@@ -60,14 +64,19 @@ function handleQuestionInput() {
   void resizeQuestionInputs();
 }
 
-watch(question, () => {
-  void resizeQuestionInputs();
-}, { flush: "post" });
+watch(
+  question,
+  () => {
+    void resizeQuestionInputs();
+  },
+  { flush: "post" },
+);
 
 onMounted(async () => {
   try {
     databases.value = await fetchDatabases();
-    if (databases.value.length && !databases.value.includes(databaseId.value)) databaseId.value = databases.value[0];
+    if (databases.value.length && !databases.value.includes(databaseId.value))
+      databaseId.value = databases.value[0];
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "无法加载数据库列表");
   }
@@ -122,10 +131,12 @@ function statusClass(status: QueryStatus) {
 }
 
 function intentLabel(intent: QueryIntent) {
-  return {
-    data_query: "数据查询",
-    general_chat: "通用回答",
-  }[intent] ?? "通用回答";
+  return (
+    {
+      data_query: "数据查询",
+      general_chat: "通用回答",
+    }[intent] ?? "通用回答"
+  );
 }
 
 function intentClass(intent: QueryIntent | string) {
@@ -141,14 +152,21 @@ function resultRows(response: QueryResponse) {
   const result = response.result;
   if (!result) return [];
   return result.rows.map((row, rowIndex) =>
-    Object.assign({ __rowIndex: rowIndex }, Object.fromEntries(result.columns.map((column, index) => [column, row[index]]))),
+    Object.assign(
+      { __rowIndex: rowIndex },
+      Object.fromEntries(result.columns.map((column, index) => [column, row[index]])),
+    ),
   );
 }
 
 async function referenceRow(message: { turn_id: string }, rowIndex: number) {
   if (!store.activeConversationId.value || !message.turn_id) return;
   try {
-    const reference = await createResultReference(store.activeConversationId.value, message.turn_id, rowIndex);
+    const reference = await createResultReference(
+      store.activeConversationId.value,
+      message.turn_id,
+      rowIndex,
+    );
     referenceIds.value = [reference.id];
     ElMessage.success(`${reference.label} 已加入下一次查询`);
   } catch (error) {
@@ -300,8 +318,15 @@ async function scrollToBottom() {
                 <ChevronDown class="knowledge-hits__chevron" :size="16" aria-hidden="true" />
               </summary>
               <div class="knowledge-hits__list">
-                <article v-for="hit in message.response.knowledge_hits" :key="hit.document_id" class="knowledge-hit">
-                  <div class="knowledge-hit__meta"><strong>{{ hit.title }}</strong><span>{{ hit.category }}</span></div>
+                <article
+                  v-for="hit in message.response.knowledge_hits"
+                  :key="hit.document_id"
+                  class="knowledge-hit"
+                >
+                  <div class="knowledge-hit__meta">
+                    <strong>{{ hit.title }}</strong
+                    ><span>{{ hit.category }}</span>
+                  </div>
                   <p>{{ hit.excerpt }}</p>
                 </article>
               </div>
@@ -543,9 +568,15 @@ async function scrollToBottom() {
   font-weight: 700;
   line-height: 1.35;
 }
-.message-markdown :deep(h1) { font-size: 1.35em; }
-.message-markdown :deep(h2) { font-size: 1.25em; }
-.message-markdown :deep(h3) { font-size: 1.15em; }
+.message-markdown :deep(h1) {
+  font-size: 1.35em;
+}
+.message-markdown :deep(h2) {
+  font-size: 1.25em;
+}
+.message-markdown :deep(h3) {
+  font-size: 1.15em;
+}
 .message-markdown :deep(ul),
 .message-markdown :deep(ol) {
   padding-left: 1.45em;
@@ -563,7 +594,11 @@ async function scrollToBottom() {
   padding: 0.12em 0.35em;
   color: #3f3f3f;
   background: #f0f0f0;
-  font: 0.86em/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+  font:
+    0.86em/1.5 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
 }
 .message-markdown :deep(pre) {
   overflow-x: auto;
@@ -751,16 +786,53 @@ async function scrollToBottom() {
   cursor: pointer;
   list-style: none;
 }
-.knowledge-hits__title::-webkit-details-marker { display: none; }
-.knowledge-hits__title span { display: inline-flex; align-items: center; gap: 7px; }
-.knowledge-hits__chevron { transition: transform 150ms ease; }
-.knowledge-hits[open] .knowledge-hits__chevron { transform: rotate(180deg); }
-.knowledge-hits__list { display: grid; gap: 8px; padding: 0 13px 13px; }
-.knowledge-hit { border-top: 1px solid #f0f0ef; padding-top: 9px; }
-.knowledge-hit__meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.knowledge-hit__meta strong { overflow: hidden; color: #353634; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.knowledge-hit__meta span { flex: 0 0 auto; color: #8a8b87; font-size: 10px; }
-.knowledge-hit p { margin: 5px 0 0; color: #777875; font-size: 11px; line-height: 1.55; }
+.knowledge-hits__title::-webkit-details-marker {
+  display: none;
+}
+.knowledge-hits__title span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.knowledge-hits__chevron {
+  transition: transform 150ms ease;
+}
+.knowledge-hits[open] .knowledge-hits__chevron {
+  transform: rotate(180deg);
+}
+.knowledge-hits__list {
+  display: grid;
+  gap: 8px;
+  padding: 0 13px 13px;
+}
+.knowledge-hit {
+  border-top: 1px solid #f0f0ef;
+  padding-top: 9px;
+}
+.knowledge-hit__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.knowledge-hit__meta strong {
+  overflow: hidden;
+  color: #353634;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.knowledge-hit__meta span {
+  flex: 0 0 auto;
+  color: #8a8b87;
+  font-size: 10px;
+}
+.knowledge-hit p {
+  margin: 5px 0 0;
+  color: #777875;
+  font-size: 11px;
+  line-height: 1.55;
+}
 .response-card__header,
 .response-card__footer {
   display: flex;
@@ -844,8 +916,7 @@ async function scrollToBottom() {
   border: 1px solid #e1e1e1;
   border-radius: 25px;
   background: #fff;
-  transition:
-    border-color 0.16s;
+  transition: border-color 0.16s;
 }
 .empty-composer {
   width: 100%;
@@ -905,7 +976,12 @@ async function scrollToBottom() {
   scrollbar-width: thin;
   color: #242424;
   background: transparent;
-  font: 21px/1.45 "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  font:
+    21px/1.45 "Microsoft YaHei",
+    "PingFang SC",
+    "Segoe UI",
+    system-ui,
+    sans-serif;
 }
 .composer textarea::-webkit-scrollbar {
   width: 8px;

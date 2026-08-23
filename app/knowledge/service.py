@@ -10,7 +10,7 @@ import threading
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -18,9 +18,17 @@ from uuid import uuid4
 from app.schemas.domain import KnowledgeHit
 
 SUPPORTED_TYPES = {"TXT": ".txt", "MD": ".md", "PDF": ".pdf", "DOCX": ".docx", "CSV": ".csv"}
+SUPPORTED_MIME_TYPES = {
+    "TXT": {"text/plain"},
+    "MD": {"text/markdown", "text/plain"},
+    "CSV": {"text/csv", "text/plain", "application/vnd.ms-excel"},
+    "PDF": {"application/pdf"},
+    "DOCX": {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+}
 MAX_CATEGORY_LENGTH = 80
 MAX_SUMMARY_LENGTH = 240
 MAX_EXCERPT_LENGTH = 420
+JOB_LOCK_TIMEOUT = timedelta(minutes=15)
 TOKEN_PATTERN = re.compile(r"[a-z0-9_]+|[\u4e00-\u9fff]", re.IGNORECASE)
 
 
@@ -59,6 +67,7 @@ class KnowledgeStore:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.database_path, timeout=10, check_same_thread=False)
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("PRAGMA busy_timeout = 10000")
         try:
@@ -121,10 +130,32 @@ class KnowledgeStore:
 
     def _recover_jobs(self) -> None:
         with self._connection() as connection:
+            now = _now()
+            running = connection.execute(
+                "SELECT id, document_id, attempts, locked_at FROM knowledge_jobs WHERE status = 'running'"
+            ).fetchall()
+            for row in running:
+                if row["attempts"] >= 3:
+                    connection.execute(
+                        "UPDATE knowledge_jobs SET status = 'failed', locked_at = NULL, error = COALESCE(error, '任务重试次数已用尽。'), updated_at = ? WHERE id = ?",
+                        (now, row["id"]),
+                    )
+                    connection.execute(
+                        "UPDATE knowledge_documents SET status = 'failed', failure_message = COALESCE(failure_message, '任务重试次数已用尽。'), updated_at = ? WHERE id = ?",
+                        (now, row["document_id"]),
+                    )
+                elif _lock_expired(row["locked_at"]):
+                    connection.execute(
+                        "UPDATE knowledge_jobs SET status = 'queued', locked_at = NULL, updated_at = ? WHERE id = ?",
+                        (now, row["id"]),
+                    )
             connection.execute(
-                "UPDATE knowledge_jobs SET status = 'queued', locked_at = NULL, updated_at = ? "
-                "WHERE status = 'running'",
-                (_now(),),
+                "UPDATE knowledge_jobs SET status = 'failed', locked_at = NULL, error = COALESCE(error, '任务重试次数已用尽。'), updated_at = ? WHERE status = 'queued' AND attempts >= 3",
+                (now,),
+            )
+            connection.execute(
+                "UPDATE knowledge_documents SET status = 'failed', failure_message = COALESCE(failure_message, '任务重试次数已用尽。'), updated_at = ? WHERE id IN (SELECT document_id FROM knowledge_jobs WHERE status = 'failed' AND attempts >= 3)",
+                (now,),
             )
 
     def _submit_queued(self) -> None:
@@ -141,6 +172,8 @@ class KnowledgeStore:
         self._executor.submit(self._run_job, job_id)
 
     def create_upload(self, filename: str, content: bytes, category: str, content_type: str | None = None) -> dict[str, Any]:
+        if "\x00" in (filename or ""):
+            raise ValueError("文件名无效。")
         safe_filename = Path(filename or "").name.strip() or "未命名文档"
         suffix = Path(safe_filename).suffix.lower()
         file_type = next((kind for kind, extension in SUPPORTED_TYPES.items() if extension == suffix), None)
@@ -158,20 +191,37 @@ class KnowledgeStore:
         original_dir.mkdir(parents=True, exist_ok=True)
         path = original_dir / f"{document_id}{suffix}"
         path.write_bytes(content)
-        with self._connection() as connection:
-            connection.execute(
-                """INSERT INTO knowledge_documents
-                (id, filename, file_type, size_bytes, category, status, created_at, updated_at, original_path)
-                VALUES (?, ?, ?, ?, ?, 'uploading', ?, ?, ?)""",
-                (document_id, safe_filename[:255], file_type, len(content), normalized_category, now, now, str(path)),
-            )
-            connection.execute(
-                """INSERT INTO knowledge_jobs
-                (id, document_id, status, created_at, updated_at) VALUES (?, ?, 'queued', ?, ?)""",
-                (str(uuid4()), document_id, now, now),
-            )
+        try:
+            with self._connection() as connection:
+                connection.execute(
+                    """INSERT INTO knowledge_documents
+                    (id, filename, file_type, size_bytes, category, status, created_at, updated_at, original_path)
+                    VALUES (?, ?, ?, ?, ?, 'uploading', ?, ?, ?)""",
+                    (document_id, safe_filename[:255], file_type, len(content), normalized_category, now, now, str(path)),
+                )
+                connection.execute(
+                    """INSERT INTO knowledge_jobs
+                    (id, document_id, status, created_at, updated_at) VALUES (?, ?, 'queued', ?, ?)""",
+                    (str(uuid4()), document_id, now, now),
+                )
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
+        response = {
+            "id": document_id,
+            "filename": safe_filename[:255],
+            "file_type": file_type,
+            "size_bytes": len(content),
+            "category": normalized_category,
+            "status": "uploading",
+            "created_at": now,
+            "updated_at": now,
+            "chunk_count": 0,
+            "summary": "",
+            "failure_message": None,
+        }
         self._submit_queued()
-        return self.get(document_id) or {}
+        return response
 
     def list(self) -> list[dict[str, Any]]:
         with self._connection() as connection:
@@ -199,11 +249,12 @@ class KnowledgeStore:
                 raise KeyError(document_id)
             if row["status"] in {"uploading", "parsing"}:
                 raise KnowledgeBusyError("文档正在解析或索引，请稍后再删除。")
-            connection.execute("DELETE FROM knowledge_documents WHERE id = ?", (document_id,))
             try:
                 connection.execute("DELETE FROM knowledge_chunks_fts WHERE document_id = ?", (document_id,))
             except sqlite3.OperationalError:
                 pass
+            connection.execute("DELETE FROM knowledge_chunks WHERE document_id = ?", (document_id,))
+            connection.execute("DELETE FROM knowledge_documents WHERE id = ?", (document_id,))
         try:
             Path(row["original_path"]).unlink(missing_ok=True)
         except OSError:
@@ -211,17 +262,28 @@ class KnowledgeStore:
 
     def retrieve(self, question: str, top_k: int | None = None) -> list[KnowledgeHit]:
         limit = max(1, top_k or self.top_k)
+        if not question.strip():
+            return []
         with self._connection() as connection:
-            rows = connection.execute(
-                "SELECT c.id, c.document_id, c.content, d.filename, d.category "
-                "FROM knowledge_chunks c JOIN knowledge_documents d ON d.id = c.document_id "
-                "WHERE d.status = 'indexed' ORDER BY d.created_at DESC"
-            ).fetchall()
-        if not rows or not question.strip():
+            rows = self._fts_rows(connection, question, limit)
+            if rows is None:
+                rows = connection.execute(
+                    "SELECT c.id, c.document_id, c.content, d.filename, d.category "
+                    "FROM knowledge_chunks c JOIN knowledge_documents d ON d.id = c.document_id "
+                    "WHERE d.status = 'indexed' ORDER BY d.created_at DESC"
+                ).fetchall()
+        if not rows:
             return []
         query_tokens = _tokens(question)
         scored: list[tuple[float, sqlite3.Row]] = []
         for row in rows:
+            if "rank" in row.keys():
+                rank = float(row["rank"])
+                # SQLite's BM25 returns lower (usually more negative) values for
+                # better matches; map that ordering onto the public 0..1 score.
+                strength = max(0.0, -rank)
+                scored.append((strength / (1.0 + strength), row))
+                continue
             tokens = _tokens(f"{row['filename']} {row['category']} {row['content']}")
             overlap = len(set(query_tokens).intersection(tokens))
             if overlap:
@@ -246,6 +308,24 @@ class KnowledgeStore:
             if len(hits) >= limit:
                 break
         return hits
+
+    @staticmethod
+    def _fts_rows(connection: sqlite3.Connection, question: str, limit: int) -> list[sqlite3.Row] | None:
+        """Return BM25-ranked rows, or None when this SQLite build has no FTS5 table."""
+        terms = _tokens(question)
+        if not terms:
+            return []
+        match_query = " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"' for term in dict.fromkeys(terms))
+        try:
+            return connection.execute(
+                "SELECT f.chunk_id AS id, f.document_id, f.content, d.filename, d.category, bm25(f) AS rank "
+                "FROM knowledge_chunks_fts f JOIN knowledge_documents d ON d.id = f.document_id "
+                "WHERE knowledge_chunks_fts MATCH ? AND d.status = 'indexed' "
+                "ORDER BY rank LIMIT ?",
+                (match_query, max(limit * 8, limit)),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return None
 
     def close(self) -> None:
         self._executor.shutdown(wait=False, cancel_futures=True)
@@ -309,6 +389,15 @@ class KnowledgeStore:
             if not row or row["status"] != "queued":
                 return None
             if row["attempts"] >= 3:
+                now = _now()
+                connection.execute(
+                    "UPDATE knowledge_jobs SET status = 'failed', locked_at = NULL, error = COALESCE(error, '任务重试次数已用尽。'), updated_at = ? WHERE id = ?",
+                    (now, job_id),
+                )
+                connection.execute(
+                    "UPDATE knowledge_documents SET status = 'failed', failure_message = COALESCE(failure_message, '任务重试次数已用尽。'), updated_at = ? WHERE id = ?",
+                    (now, row["document_id"]),
+                )
                 return None
             now = _now()
             connection.execute(
@@ -335,6 +424,8 @@ class KnowledgeStore:
                 ("failed" if final else "uploading", now, message, row["document_id"]),
             )
         if not final:
+            with self._lock:
+                self._submitted.discard(job_id)
             self._submit(job_id)
 
     def _set_document_status(self, document_id: str, status: str) -> None:
@@ -374,6 +465,18 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _lock_expired(value: str | None) -> bool:
+    if not value:
+        return True
+    try:
+        locked_at = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return True
+    if locked_at.tzinfo is None:
+        locked_at = locked_at.replace(tzinfo=UTC)
+    return datetime.now(UTC) - locked_at >= JOB_LOCK_TIMEOUT
+
+
 def _tokens(value: str) -> list[str]:
     return TOKEN_PATTERN.findall(value.lower())
 
@@ -401,10 +504,20 @@ def _chunk_text(text: str, size: int, overlap: int) -> list[str]:
 def _validate_signature(file_type: str, content: bytes, content_type: str | None) -> None:
     if file_type == "PDF" and not content.startswith(b"%PDF"):
         raise ValueError("PDF 文件签名无效。")
-    if file_type == "DOCX" and not content.startswith(b"PK"):
-        raise ValueError("DOCX 文件签名无效。")
-    if content_type and content_type not in {"application/octet-stream", "text/plain", "text/markdown", "text/csv", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}:
-        raise ValueError("文件类型不受支持。")
+    if file_type == "DOCX":
+        if not content.startswith(b"PK"):
+            raise ValueError("DOCX 文件签名无效。")
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                names = set(archive.namelist())
+        except (zipfile.BadZipFile, OSError) as error:
+            raise ValueError("DOCX 文件签名无效。") from error
+        if "[Content_Types].xml" not in names or "word/document.xml" not in names:
+            raise ValueError("DOCX 文件签名无效。")
+    if content_type:
+        normalized_type = content_type.split(";", 1)[0].strip().lower()
+        if normalized_type != "application/octet-stream" and normalized_type not in SUPPORTED_MIME_TYPES[file_type]:
+            raise ValueError("文件类型不受支持。")
 
 
 def _extract_text(file_type: str, path: Path) -> str:

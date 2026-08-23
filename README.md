@@ -52,7 +52,7 @@ sqlite3 data/conversations.sqlite3 ".backup 'backups/conversations-YYYYMMDD.sqli
 | V | 只读 SQL 校验 | 拒绝写操作、DDL、控制语句、多语句、注释、系统表和危险函数。 |
 | V | 表与字段白名单 | 支持按访问策略校验允许访问的表和字段。 |
 | V | 受限 SQL 执行 | 支持参数绑定、查询截止时间和 SQLite progress handler 中断。 |
-| V | 结果安全格式化 | 支持结果行数上限、截断标记和敏感字段掩码。 |
+| V | 结果安全格式化 | 适配器先执行行数上限、截断和基础脱敏；Graph 随后通过 `result_guard` 复核结果形状、投影映射、别名/表达式脱敏和字段级权限。 |
 | V | MySQL 适配器 | 支持凭据引用、TLS、Schema 读取、只读执行、超时和安全结果格式化。 |
 | V | 多数据库适配器编排 | 根据已登记且启用的 `database_id` 构建 SQLite/MySQL 适配器。 |
 | V | 经授权外部数据库连接 | 管理员登记外部 MySQL 后显式开启表权限；客户端只能提交允许的 `database_id`。 |
@@ -88,33 +88,36 @@ Schema-RAG 对本项目有价值，但不是所有规模都必须启用复杂的
 
 - 当前 Demo 只有少量表时，完整 Schema 或 BM25 已足够，RAG 的主要价值是保持接口、权限过滤和后续扩展能力。
 - 当数据库包含几十到数百张表、表名相似、字段含义依赖中文描述或业务别名时，按问题召回相关表可以减少 Prompt 长度，并降低选错表和字段的概率。
-- 当前实际链路是“意图判断 → Schema 检索 → SQL 生成”。检索结果会写入 `schema_context`，随后注入 SQL 生成和 SQL 修复 Prompt；通用问答和澄清分支不会读取 Schema。
+- 当前实际链路是“意图判断 → Schema 检索 → SQL 生成 → 校验 → 执行 → `result_guard` → `summarize_result` → 收尾”。检索结果会写入 `schema_context`，随后注入 SQL 生成和 SQL 修复 Prompt；通用问答和澄清分支不会读取 Schema，也不会执行结果摘要。
 - 默认配置为 `SCHEMA_RETRIEVAL_MODE=hybrid`，优先使用向量和 BM25 混合召回；向量模型或重排依赖不可用时降级到 BM25，BM25 也不可用则安全失败，不会未经权限过滤直接把完整 Schema 发送给模型。
 - 生产环境应根据表数量和召回评测选择模式。小型数据库可使用 `bm25`，中大型数据库再使用 `hybrid`，并通过 EX Accuracy、选表准确率、Prompt token、延迟和失败率验证收益。
 
-### 业务知识库 RAG（设计中）
+### 业务知识库 RAG
 
-业务知识库 RAG 与 Schema-RAG 是两类不同能力：Schema-RAG 检索表、字段和关联关系，服务 SQL 结构生成；知识库 RAG 检索指标口径、业务规则、数据字典和脱敏的问题-SQL 示例，服务业务语义理解。当前项目只完成了前端知识库 Mock 页面和设计规划，尚未实现后端知识库能力。
+业务知识库 RAG 与 Schema-RAG 是两类不同能力：Schema-RAG 检索表、字段和关联关系，服务 SQL 结构生成；知识库 RAG 检索指标口径、业务规则和数据字典，作为业务背景帮助模型理解问题。知识库是全局资源，所有已登录用户可读，仅 `super_admin` 可上传和删除。
+
+详细实现、目录职责、API、任务状态和测试说明见：[业务知识库 RAG 实现说明](docs/业务知识库RAG实现说明.md)。
 
 | 状态 | 功能 | 当前情况 |
 | --- | --- | --- |
-| V | 前端知识库页面 | 已有文档列表、分类、上传状态和删除交互，但默认使用 Mock 数据。 |
-| X | 文档上传与解析 | 后端尚未提供真实上传、文本提取和内容校验。 |
-| X | 文档切分与索引 | 尚未实现 chunk 构建、SQLite 元数据管理、BM25/Chroma 索引和版本发布。 |
-| X | 查询流程接入 | 当前 LLM Prompt 不包含业务知识库内容，`data_query` 只使用 Schema-RAG。 |
-| X | 命中来源返回 | `knowledge_hits` 已预留前端类型，后端尚未返回文档摘要和来源。 |
+| V | 文档资料库页面 | Vue 页面提供列表、分类筛选、状态轮询、上传和删除确认。 |
+| V | 文档上传与解析 | 支持 TXT、Markdown、CSV、PDF、DOCX，校验扩展名、MIME、签名、20 MiB 大小和解析文本长度。 |
+| V | 持久化任务与索引 | SQLite 保存文档、chunk 和 job；进程内线程池执行，支持启动恢复、重试和失败原因保留。 |
+| V | 查询流程接入 | Graph 先检索已索引知识片段，再进入原有意图判断和 Schema/SQL 流程；知识检索失败自动降级。 |
+| V | 命中来源返回 | `QueryResponse.knowledge_hits` 返回标题、分类、摘要和相关度，前端可折叠查看。 |
 
 目标链路为：
 
 ```text
-data_query
-  -> 业务知识库检索（指标口径、规则、数据字典、示例）
-  -> Schema-RAG（表、字段、关系）
+查询请求
+  -> 业务知识库检索（指标口径、规则、数据字典）
+  -> 意图判断
+  -> Schema-RAG（表、字段、关系；唯一的表字段权威来源）
   -> Prompt 组装
   -> SQL 生成与安全校验
 ```
 
-首期设计按 `database_id` 隔离知识库，支持 TXT、Markdown 和 CSV；PDF/DOCX 作为后续扩展。原文存储、SQLite 元数据和 BM25/Chroma Hybrid 索引均属于后续后端实现范围。知识库检索失败或没有命中时继续 Schema-RAG 和 SQL 流程，不因可选知识上下文阻断查询。查询响应只返回标题、分类、摘要和相关度，不返回未经审核的完整原文。
+原文保存在 `KNOWLEDGE_ROOT`，SQLite 元数据和 chunk 使用 FTS5/BM25 检索，并在不支持 FTS5 时使用确定性降级。知识片段被标记为不可信业务背景，不能改变 Schema 权限或推导不存在的表字段；检索失败或没有命中时继续原有通用回答、Schema-RAG 和 SQL 流程。查询响应只返回标题、分类、摘要和相关度，不返回未经审核的完整原文。
 
 ### LangGraph 自纠错工作流
 
@@ -123,12 +126,14 @@ data_query
 | V | 工作流状态模型 | 已定义请求、Schema、SQL、结果、错误和 Trace 状态字段。 |
 | V | 初始状态创建 | 可初始化请求 ID、问题、数据库、方言、轮次和运行状态。 |
 | V | 修复路由规则 | 已定义可修复错误类别和最大轮次判断。 |
-| V | Graph 构建 | `build_query_graph` 已串联意图判断、Schema 检索、生成、校验、执行、修复和收尾节点。 |
+| V | Graph 构建 | `build_query_graph` 已串联意图判断、Schema 检索、生成、校验、执行、结果安全复核、摘要、修复和收尾节点。 |
 | V | 问题范围判断 | 规则优先判断明确数据查询/通用问题，边界问题由 LLM 以置信度分类，低置信度保守澄清。 |
 | V | Schema 检索节点 | 在 SQL 生成前按问题召回授权 Schema，并固定版本和上下文。 |
 | V | SQL 生成节点 | 使用 LLM 根据方言、问题和检索到的 Schema 生成只读 SQL。 |
 | V | SQL 校验节点 | 使用 AST 和访问策略校验单语句、只读操作及表字段权限。 |
-| V | SQL 执行节点 | 在超时、结果行数和 Schema 版本校验下执行只读 SQL。 |
+| V | SQL 执行节点 | 在超时、结果行数和 Schema 版本校验下执行只读 SQL；成功后必须经过 `result_guard`。 |
+| V | 结果安全复核节点 | 确定性检查结果形状、重新限制行数、按已验证 SQL AST 推导输出字段并处理敏感列；无法证明安全时失败关闭。 |
+| V | 结果摘要节点 | 仅基于安全 `QueryResult` 生成 `final_answer`；摘要失败保持查询成功并使用 `deterministic_fallback`。 |
 | V | 错误分类节点 | 根据执行或校验结果区分可修复错误与安全、权限、资源错误。 |
 | V | SQL 修复节点 | 对允许修复的 SQL 内容错误复用首轮 Schema 上下文进行重试。 |
 | V | 收尾节点 | 生成脱敏的最终响应和 Trace。 |
@@ -196,7 +201,10 @@ flowchart LR
     S --> G[SQL 生成]
     G --> V[AST 安全校验]
     V --> E[只读数据库执行]
-    E -->|成功| R[结果与 Trace]
+    E -->|成功| RG[结果安全复核]
+    RG -->|通过| RS[安全结果摘要]
+    RG -->|失败关闭| B[blocked / 清空结果]
+    RS --> R[QueryResult + final_answer + Trace]
     E -->|失败| C[错误分类]
     C -->|可修复且有轮次| F[SQL 修复]
     F --> V
@@ -208,7 +216,7 @@ flowchart LR
 - **LangGraph 自纠错闭环**：使用显式 State、条件分支和最大轮次控制，而不是黑盒 SQL Agent。
 - **问题范围判断**：在 Schema 检索前以规则优先判断明确数据查询/通用问题，边界问题由 LLM 以置信度分类，低置信度保守澄清，避免无关问题被强行转换为 SQL。
 - **Schema-RAG**：首次检索后固定 `schema_context` 和 `schema_version`，修复阶段不重复检索，避免 Schema 漂移。
-- **安全执行**：基于 `sqlglot` AST 的只读策略、专用只读数据库账号、超时取消、表/字段白名单与结果脱敏。
+- **安全执行**：基于 `sqlglot` AST 的只读策略、专用只读数据库账号、超时取消、表/字段白名单与双层结果脱敏；`QueryResult` 是结构化事实源，LLM 只能生成 `final_answer`。
 - **错误治理**：内部原始异常、持久化 Trace、用户响应三层隔离，避免泄露连接串、路径、堆栈和敏感数据。
 - **可评测性**：通过 CSpider/Spider 的 EX Accuracy、修复成功率、平均轮次和失败分类，对比单轮 NL2SQL 基线。
 
@@ -218,7 +226,7 @@ flowchart LR
 | --- | --- | --- |
 | P0 | LangGraph 主链路、固定 SQLite Demo、基础 Schema 读取、SQL 安全校验、FastAPI、日志与测试 | 完成成功查询、SQL 修复、安全拦截和受控失败 |
 | P1 | ChromaDB + BM25 混合检索、Reranker、MySQL、评测与基线对照 | 可重复输出 EX、轮次、延迟和失败分类 |
-| P2 | Human-in-the-Loop、业务知识库 RAG、Example-RAG、Vue3 + Element Plus 前端 | 可审批 SQL、按数据库隔离检索业务知识，并展示命中来源和完整链路 |
+| P2 | Human-in-the-Loop、业务知识库 RAG、Example-RAG、Vue3 + Element Plus 前端 | 知识库已支持全局资料上传、异步索引、检索降级和命中来源展示；审批与 Example-RAG 仍为后续扩展 |
 
 ## 技术栈
 
@@ -241,7 +249,8 @@ app/
 ├── config/          # 配置读取和启动校验
 ├── graph/           # State、节点、路由和 Graph 构建
 ├── llm/             # 模型适配、Prompt、输出解析和重试
-├── rag/             # 元数据、索引、检索和重排
+├── rag/             # Schema 元数据、索引、检索和重排
+├── knowledge/       # 业务文档、chunk、异步索引和知识检索
 ├── db/              # 适配器、连接、SQL 策略和结果格式化
 ├── services/        # API 与领域组件之间的应用服务
 ├── tool/            # Graph 可调用的应用工具
@@ -260,6 +269,7 @@ web/                 # P2 前端
 ## 开发文档
 
 - [项目说明文档](docs/项目说明文档.md)：架构、状态定义、节点路由、API、RAG、安全、评测、目录与测试策略。
+- [业务知识库 RAG 实现说明](docs/业务知识库RAG实现说明.md)：知识库目录职责、API、任务状态、检索降级、配置和测试。
 
 ## 安全边界
 
@@ -275,7 +285,7 @@ web/                 # P2 前端
 - 可运行的 SQLite NL2SQL Demo 与固定测试数据。
 - `/api/v1/query` 查询接口、健康检查和受控 Trace。
 - 单轮基线与链式自纠错方案的评测报告。
-- P2 的审批流、业务知识库 RAG、Example-RAG 和可视化链路页面；当前知识库页面仍是 Mock，后端入库和检索尚未实现。
+- P2 的审批流和 Example-RAG 仍是后续扩展；业务知识库 RAG 已完成真实文档入库、异步索引、FTS5/BM25 检索、权限控制和前端命中展示。
 - 经授权外部 MySQL 数据库的注册、只读连接、Schema 读取和安全执行能力。
 
 详细实现规范、接口约束和验收标准请阅读：[docs/项目说明文档.md](docs/项目说明文档.md)。

@@ -23,7 +23,8 @@ app/
 ├── db/
 │   ├── base.py                # DatabaseExecutor 协议和底层异常边界
 │   ├── connection_manager.py  # 创建只读 SQLite 连接
-│   ├── result_formatter.py    # 行数限制、字段脱敏和结果标准化
+│   ├── result_formatter.py    # 第一层行数限制、字段脱敏和结果标准化
+│   ├── result_guard.py         # Graph 第二层结果形状、投影和权限复核
 │   ├── security_policy.py     # sqlglot AST 只读和访问策略校验
 │   └── sqlite_adapter.py      # SQLite 适配器和执行生命周期
 └── rag/
@@ -230,6 +231,13 @@ FOREIGN KEYS none
 - `users.email` 等敏感字段返回 `***`；
 - 不返回原始 SQL、连接字符串、文件路径或底层异常。
 
+适配器格式化是数据库层的第一道结果边界，但不能单独覆盖模型生成的输出别名和表达式。Graph 在 `execute_sql` 成功后还会执行 `result_guard`：
+
+- 再次确认 `columns` 数量、每行字段数量和 `row_count` 一致，并重新应用 `RESULT_ROW_LIMIT`；
+- 根据 `validated_sql` 的 sqlglot AST 和 `AccessPolicy` 推导输出列来源，`email AS contact`、`lower(email) AS value` 等直接列、别名和表达式均按敏感字段处理；
+- 配置字段级权限时拒绝 `SELECT *` 与 `table.*`，无法解析投影或无法证明输出字段安全时失败关闭，清空 `query_result` 并返回 `blocked`；
+- 通过复核的 `QueryResult` 才能进入摘要模型；摘要只生成 `final_answer`，不改变结构化行。
+
 ## 10. 测试与验收
 
 ### SQL 安全测试
@@ -269,8 +277,9 @@ retrieve_schema
   → generate_sql
   → validate_sql
   → execute_sql
-  → classify_error / repair_sql
-  → finalize
+      ├─ 成功 → result_guard → summarize_result → finalize
+      └─ 可修复失败且有轮次 → repair_sql → validate_sql
+      └─ 其他失败 → finalize
 ```
 
 Graph 节点通过 `inspect_schema()` 获取固定的 `SchemaRetrieval`，通过 `execute_readonly()` 执行已经通过安全策略的 SQL。SQLite 适配器的安全边界和结果契约不因后续接入 LangGraph 而改变。

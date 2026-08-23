@@ -226,6 +226,7 @@ export interface KnowledgeDocument {
   category: string;
   status: KnowledgeDocumentStatus;
   created_at: string;
+  updated_at?: string;
   chunk_count?: number;
   summary: string;
   failure_message?: string;

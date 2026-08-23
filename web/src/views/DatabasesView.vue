@@ -243,17 +243,6 @@ onMounted(() => void loadDatabases());
 
 <template>
   <main class="databases-page">
-    <header class="page-header">
-      <div>
-        <p class="eyebrow">DATA SOURCES</p>
-        <h1>数据库</h1>
-        <p class="page-description">管理数据源，并控制 Agent 可访问的数据表。</p>
-      </div>
-      <button v-if="isAdmin" class="primary-button" type="button" @click="openCreate">
-        <Plus :size="17" /> 添加数据库
-      </button>
-    </header>
-
     <p v-if="errorMessage && !modalOpen" class="alert" role="alert">{{ errorMessage }}</p>
 
     <section class="database-workspace" aria-labelledby="database-list-title">
@@ -553,12 +542,11 @@ onMounted(() => void loadDatabases());
 <style scoped>
 .databases-page {
   min-height: 100vh;
-  padding: 34px clamp(20px, 5vw, 72px);
+  padding: 40px 32px 48px;
   color: #202123;
   background: #ffffff;
 }
 
-.page-header,
 .detail-header,
 .database-sidebar__header,
 .table-heading,
@@ -569,11 +557,6 @@ onMounted(() => void loadDatabases());
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-}
-
-.page-header {
-  align-items: flex-end;
-  margin-bottom: 24px;
 }
 
 .eyebrow {
@@ -591,12 +574,6 @@ p {
   margin-top: 0;
 }
 
-h1 {
-  margin-bottom: 7px;
-  font-size: 30px;
-  letter-spacing: -0.02em;
-}
-
 h2 {
   margin-bottom: 0;
   font-size: 20px;
@@ -608,7 +585,6 @@ h3 {
   font-size: 14px;
 }
 
-.page-description,
 .table-heading p,
 .database-sidebar__header p {
   margin-bottom: 0;
@@ -676,29 +652,31 @@ h3 {
 
 .database-workspace {
   display: grid;
-  min-height: 590px;
-  grid-template-columns: minmax(230px, 260px) minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
+  min-height: 636px;
+  grid-template-columns: minmax(250px, 280px) minmax(0, 1fr);
   overflow: hidden;
-  border: 1px solid #e5e5e5;
-  border-radius: 10px;
+  border: 1px solid #e7e7e7;
+  border-radius: 12px;
   background: #ffffff;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.045);
 }
 
 .database-sidebar {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  padding: 18px 12px 12px;
+  padding: 20px 13px 13px;
   background: #f7f7f8;
 }
 
 .database-sidebar__header {
-  padding: 3px 7px 15px;
+  padding: 4px 8px 18px;
 }
 
 .database-sidebar__header h2 {
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .database-sidebar__header p {
@@ -719,10 +697,10 @@ h3 {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   border: 0;
-  border-radius: 7px;
-  padding: 10px 8px;
+  border-radius: 8px;
+  padding: 12px 9px;
   color: #444746;
   background: transparent;
   text-align: left;
@@ -735,7 +713,7 @@ h3 {
 
 .database-nav-item--active {
   color: #202123;
-  background: #e5e5e5;
+  background: #e4e4e4;
 }
 
 .database-nav-item--inactive {
@@ -744,8 +722,8 @@ h3 {
 
 .database-nav-item__icon {
   display: grid;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   flex: 0 0 auto;
   place-items: center;
   border-radius: 6px;
@@ -793,19 +771,19 @@ h3 {
 
 .sidebar-footer {
   display: grid;
-  gap: 7px;
-  margin-top: 14px;
+  gap: 8px;
+  margin-top: 16px;
 }
 
 .sidebar-refresh-button,
 .sidebar-add-button {
   display: inline-flex;
   width: 100%;
-  min-height: 38px;
+  min-height: 40px;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border-radius: 7px;
+  border-radius: 8px;
   padding: 0 12px;
   font-size: 12px;
   font-weight: 700;
@@ -856,9 +834,9 @@ h3 {
 }
 
 .detail-header {
-  min-height: 100px;
-  padding: 25px 28px 20px;
-  border-bottom: 1px solid #eeeeee;
+  min-height: 108px;
+  padding: 25px 30px 21px;
+  border-bottom: 1px solid #ededed;
 }
 
 .database-identity {
@@ -870,8 +848,8 @@ h3 {
 
 .database-icon {
   display: grid;
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
   flex: 0 0 auto;
   place-items: center;
   border-radius: 8px;
@@ -920,9 +898,9 @@ h3 {
 .detail-summary {
   display: flex;
   gap: 1px;
-  margin: 20px 28px 0;
-  border: 1px solid #e7e7e7;
-  background: #e7e7e7;
+  margin: 22px 30px 0;
+  border: 1px solid #e5e5e5;
+  background: #e5e5e5;
 }
 
 .summary-item {
@@ -930,7 +908,7 @@ h3 {
   min-width: 0;
   flex: 1;
   gap: 5px;
-  padding: 14px 16px;
+  padding: 15px 18px;
   background: #ffffff;
 }
 
@@ -947,7 +925,7 @@ h3 {
 }
 
 .detail-section {
-  margin: 24px 28px 0;
+  margin: 26px 30px 0;
 }
 
 .table-heading {
@@ -968,18 +946,18 @@ h3 {
 .table-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 12px;
+  gap: 10px 12px;
 }
 
 .table-row {
   display: flex;
-  min-height: 48px;
+  min-height: 50px;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   border: 1px solid #ededed;
-  border-radius: 6px;
-  padding: 7px 11px;
+  border-radius: 7px;
+  padding: 8px 12px;
   cursor: pointer;
 }
 
@@ -1021,10 +999,10 @@ h3 {
 }
 
 .detail-actions {
-  min-height: 72px;
-  margin-top: 24px;
-  border-top: 1px solid #eeeeee;
-  padding: 14px 28px;
+  min-height: 74px;
+  margin-top: 26px;
+  border-top: 1px solid #ededed;
+  padding: 15px 30px;
 }
 
 .action-group {
@@ -1196,18 +1174,9 @@ fieldset {
   margin-top: 4px;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 1100px) {
   .databases-page {
-    padding: 22px 16px;
-  }
-
-  .page-header {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .page-header .primary-button {
-    width: 100%;
+    padding: 22px 16px 32px;
   }
 
   .database-workspace {

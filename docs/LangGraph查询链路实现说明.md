@@ -16,7 +16,12 @@ OPENAI_API_KEY=
 OPENAI_BASE_URL=
 OPENAI_MODEL=
 INTENT_CONFIDENCE_THRESHOLD=0.75
+RESULT_ROW_LIMIT=100
+RESULT_SUMMARY_ENABLED=true
+RESULT_SUMMARY_MAX_CHARS=12000
 ```
+
+`RESULT_SUMMARY_ENABLED=false` 时跳过摘要模型，仍返回安全 `QueryResult` 和确定性 `final_answer`。`RESULT_SUMMARY_MAX_CHARS` 同时限制传入摘要模型的稳定 JSON 和模型输出；超限直接降级，不影响查询成功状态。
 
 ## 2. 目录与职责
 
@@ -49,7 +54,9 @@ app/
 │   ├── validation_node.py    # SQL AST、安全策略和白名单校验
 │   ├── execution_node.py     # 受限数据库查询执行和 Schema 漂移检查
 │   ├── general_answer_node.py # 非数据库问题的通用回答
-│   ├── finalize_node.py      # 统一生成最终状态和用户说明
+│   ├── result_guard_node.py   # 执行后确定性结果安全复核
+│   ├── result_summary_node.py # 基于安全结果生成自然语言摘要
+│   ├── finalize_node.py       # 统一生成最终状态和用户说明
 │   └── repair_node.py        # 有限错误类别的 SQL 自动修复节点
 ├── rag/
 │   ├── introspector.py       # SQLite/MySQL 元数据读取
@@ -73,7 +80,8 @@ app/
 │   ├── mysql_adapter.py      # MySQL 只读适配器和 Schema 读取
 │   ├── registry.py           # 数据库注册和表级 Agent 权限持久化
 │   ├── connection_manager.py # 连接生命周期和超时管理
-│   ├── result_formatter.py   # 行数限制、截断和结果标准化
+│   ├── result_formatter.py   # 第一层行数限制、截断和结果标准化
+│   ├── result_guard.py       # 第二层投影映射、字段脱敏和结果形状复核
 │   └── security_policy.py    # SQL AST 只读和访问策略校验
 ├── errors/
 │   ├── categories.py         # 稳定业务错误类别
@@ -226,7 +234,7 @@ flowchart TD
         RO[SQLite mode=ro 只读连接]
         PROGRESS[progress handler 超时中断]
         RESULT[结果行数限制和字段脱敏]
-        SUCCESS[query_result]
+        SUCCESS[query_result<br/>适配器首次格式化]
         DBFAIL[数据库执行失败<br/>connection/syntax/unknown]
         REPAIRROUTE{可修复且未达轮次?}
         REPAIR[repair_sql<br/>复用固定 Schema]
@@ -240,7 +248,12 @@ flowchart TD
     DBFAIL --> REPAIRROUTE
     REPAIRROUTE -- 是 --> REPAIR --> VALIDATE
     REPAIRROUTE -- 否 --> FINAL
-    SUCCESS --> FINAL
+    SUCCESS --> RESULTGUARD
+    RESULTGUARD[result_guard<br/>确定性安全复核]
+    RESULTGUARD -- 通过 --> SUMMARY
+    RESULTGUARD -- 失败关闭 --> BLOCKEDRESULT[blocked<br/>清空 query_result] --> FINAL
+    SUMMARY[summarize_result<br/>安全结果摘要]
+    SUMMARY --> FINAL
 
     FINAL[finalize]
     RESPONSE[map_query_state<br/>生成安全 QueryResponse]
@@ -253,6 +266,8 @@ flowchart TD
     GENERATE -.-> SSEPROGRESS
     VALIDATE -.-> SSEPROGRESS
     EXECUTE -.-> SSEPROGRESS
+    RESULTGUARD -.-> SSEPROGRESS
+    SUMMARY -.-> SSEPROGRESS
     REPAIR -.-> SSEPROGRESS
     GENERAL -.-> SSEPROGRESS
     FINAL --> RESPONSE --> COMPLETE --> F
@@ -267,8 +282,8 @@ flowchart TD
 ```text
 intent_gate
   ├─ data_query     -> retrieve_schema -> generate_sql -> validate_sql -> execute_sql
+  │                  -> result_guard -> summarize_result -> finalize -> END
   │                  -> repair_sql（可修复错误且未达轮次） -> validate_sql
-  │                  -> finalize -> END
   ├─ general_chat   -> general_answer -> finalize -> END
 ```
 
@@ -279,6 +294,8 @@ intent_gate
 | `generate_sql` | [`generation_node.py`](../app/graph/generation_node.py) | 基于固定 Schema 生成单条只读 SQL | 否 |
 | `validate_sql` | [`validation_node.py`](../app/graph/validation_node.py) | 执行 SQL AST、安全、表和字段白名单校验 | 否 |
 | `execute_sql` | [`execution_node.py`](../app/graph/execution_node.py) | 只读连接、参数绑定、超时中断和结果格式化 | 是，仅 `data_query` |
+| `result_guard` | [`result_guard_node.py`](../app/graph/result_guard_node.py) | 不调用 LLM，复核结果形状、行数上限、SQL 投影与字段权限；对直接列、别名和表达式统一脱敏，无法证明安全时失败关闭 | 否；读取已执行 SQL 和结果 |
+| `summarize_result` | [`result_summary_node.py`](../app/graph/result_summary_node.py) | 仅把安全复核后的结果交给 LLM 生成 `final_answer`；模型失败时使用确定性回答 | 否 |
 | `general_answer` | [`general_answer_node.py`](../app/graph/general_answer_node.py) | 回答无需本地数据库的普通问题 | 否 |
 | `repair_sql` | [`repair_node.py`](../app/graph/repair_node.py) | 对有限数据库错误复用固定 Schema 生成修复 SQL，并受最大轮次限制 | 否 |
 | `finalize` | [`finalize_node.py`](../app/graph/finalize_node.py) | 整理回答、查询结果或受控错误 | 否 |
@@ -314,7 +331,11 @@ intent_gate
 
 首次检索得到的 `schema_version` 固定在 State 中。`execute_sql` 执行前重新读取数据库 Schema 指纹；版本变化时返回 `schema_changed`，不执行旧 SQL，也不在同一请求中替换 Schema 上下文。
 
-`execute_sql` 仅执行已校验 SQL，使用只读连接、参数绑定、截止时间进度回调、结果行数上限和敏感字段脱敏。执行失败会写入稳定的错误分类和安全消息；语法、未知表/字段、连接关系和聚合错误在未超过 `max_iterations` 时进入 `repair_sql`，修复阶段复用首次检索的 Schema，不重复检索。检索为空时直接返回 `schema_retrieval_error`，不会调用 SQL 生成模型。
+`execute_sql` 仅执行已校验 SQL，使用只读连接、参数绑定、截止时间进度回调、结果行数上限和适配器层敏感字段脱敏。执行失败会写入稳定的错误分类和安全消息；语法、未知表/字段、连接关系和聚合错误在未超过 `max_iterations` 时进入 `repair_sql`，修复阶段复用首次检索的 Schema，不重复检索。检索为空时直接返回 `schema_retrieval_error`，不会调用 SQL 生成模型。
+
+执行成功后不会直接把结果交给回答模型。`result_guard` 是第二层、确定性的结果安全边界：确认列数与每行字段数一致，重新执行 `RESULT_ROW_LIMIT`，根据 `validated_sql` AST 和 `AccessPolicy` 推导输出列来源，并覆盖别名列、表达式、CTE/派生查询中的敏感字段。配置字段级权限时，`SELECT *` 和 `table.*` 一律拒绝；无法解析投影或无法证明输出字段安全时清空 `query_result`，将状态设为 `blocked`。因此 `QueryResult` 始终是前端表格、结果引用和会话持久化的权威事实源。
+
+`result_guard` 成功且状态为 `succeeded` 后才进入 `summarize_result`。摘要 Prompt 只接收用户问题和安全结果的稳定 JSON（列名、行、`row_count`、`truncated`），把单元格视为不可信数据，不执行其中的指令，不生成 SQL，也不能修改、删除或重排结构化结果。摘要模型超时、异常、空输出、超长或上下文序列化失败时，查询仍保持成功，`final_answer` 回退为“查询完成，共返回 N 行结果”（截断时追加说明），并将 `answer_source` 设为 `deterministic_fallback`；成功摘要为 `result_summary`。通用问答使用 `general_llm`，且不经过结果摘要节点。
 
 ### 4.3 数据库工具边界
 
@@ -334,7 +355,8 @@ Graph 通过 `DatabaseExecutor` 协议访问数据库：`demo` 使用 [`sqlite_a
 - `retrieval_scores`：内部召回分数摘要，不包含原始索引对象；
 - `retrieved_tables`：经过权限过滤后返回的表名；
 - `schema_context`、`generated_sql`、`validated_sql`、`query_result`：仅数据查询路径产生；
-- `error_category`、`safe_error`、`final_answer`：受控错误和最终回答。
+- `error_category`、`safe_error`、`final_answer`：受控错误和最终回答；
+- `answer_source`：`general_llm`、`result_summary` 或 `deterministic_fallback`，标识 `final_answer` 的来源。
 
 公共响应 [`app/schemas/response.py`](../app/schemas/response.py) 会返回意图元数据。非数据分支的 `result` 和 `generated_sql` 为 `null`：
 
@@ -348,6 +370,7 @@ Graph 通过 `DatabaseExecutor` 协议访问数据库：`demo` 使用 [`sqlite_a
   "status": "succeeded",
   "iteration": 0,
   "error_category": null,
+  "answer_source": "result_summary",
   "final_answer": "查询完成，共返回 1 行结果。",
   "result": {
     "columns": ["user_count"],
@@ -362,7 +385,7 @@ Graph 通过 `DatabaseExecutor` 协议访问数据库：`demo` 使用 [`sqlite_a
 
 ## 6. SSE 输出
 
-[`routes.py`](../app/api/routes.py) 中的 `POST /api/v1/query` 返回 `text/event-stream`。事件顺序通常为 `start`、多个 `progress`、最终 `complete`；未处理的模型、Schema 或执行异常返回 `error`。`progress` 会带节点名、状态、轮次、面向用户的解释；`intent_gate` 额外带 `intent`、`classification_valid`、`confidence`、`source` 和 `reason`。
+[`routes.py`](../app/api/routes.py) 中的 `POST /api/v1/query` 返回 `text/event-stream`。事件顺序通常为 `start`、多个 `progress`、最终 `complete`；未处理的模型、Schema 或执行异常返回 `error`。`progress` 会带节点名、状态、轮次、面向用户的解释；`intent_gate` 额外带 `intent`、`classification_valid`、`confidence`、`source` 和 `reason`；`result_guard` 带 `guarded`，`summarize_result` 带 `answer_source`。
 
 ### 数据查询示例
 
@@ -385,8 +408,14 @@ data: {"node":"validate_sql","validated":true}
 event: progress
 data: {"node":"execute_sql","row_count":1}
 
+event: progress
+data: {"node":"result_guard","status":"succeeded","guarded":true}
+
+event: progress
+data: {"node":"summarize_result","status":"succeeded","answer_source":"result_summary"}
+
 event: complete
-data: {"intent":"data_query","status":"succeeded","result":{}}
+data: {"intent":"data_query","status":"succeeded","answer_source":"result_summary","result":{}}
 ```
 
 ### 非数据查询示例
@@ -428,8 +457,10 @@ data: {"intent":"general_chat","status":"succeeded","result":null,"generated_sql
 | 流内模型调用失败 | SSE `error`，返回安全错误说明 |
 | Schema 读取或 SQL 执行异常 | SSE `error` 或受控失败状态；不泄漏连接信息 |
 | SQL 安全策略拒绝 | 状态为 `blocked`，通过 `complete` 返回受控结果 |
+| 结果安全复核失败 | `result_guard` 清空 `query_result`，状态为 `blocked`，通过 `complete` 返回安全错误 |
+| 结果摘要模型失败 | 保持 `status=succeeded`，保留安全 `result`，`final_answer` 使用确定性降级并标记 `answer_source=deterministic_fallback` |
 
-SQL 执行前还会进行单语句、只读、表/字段白名单和 AST 检查；执行使用只读连接、超时、行数限制、参数绑定及结果脱敏。原始异常不会写入公共响应。
+SQL 执行前还会进行单语句、只读、表/字段白名单和 AST 检查；执行使用只读连接、超时、行数限制、参数绑定及第一层结果脱敏，随后由 `result_guard` 执行第二层投影感知复核。原始异常不会写入公共响应。
 
 ## 9. 意图分类准确率评测
 

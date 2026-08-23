@@ -393,7 +393,7 @@ async def query(
             result_row_limit=settings.result_row_limit,
             result_summary_enabled=settings.result_summary_enabled,
             result_summary_max_chars=settings.result_summary_max_chars,
-            knowledge_retriever=get_knowledge_store(settings).retrieve,
+            knowledge_retriever=_safe_knowledge_retriever(settings),
             knowledge_top_k=settings.knowledge_top_k,
         )
     except LLMConfigurationError as error:
@@ -667,6 +667,17 @@ def _embedding_provider(settings: Settings) -> SentenceTransformerEmbedding:
         return provider
 
 
+def _safe_knowledge_retriever(settings: Settings):
+    try:
+        return get_knowledge_store(settings).retrieve
+    except Exception as error:
+        logger.warning(
+            "Knowledge store unavailable; continuing without knowledge retrieval: %s",
+            type(error).__name__,
+        )
+        return None
+
+
 def _primary_key_columns(settings: Settings, database_id: str, table: str) -> tuple[str, ...]:
     record = get_database_registry(settings).get(database_id)
     if record is None:
@@ -721,7 +732,7 @@ def _create_graph_runtime(settings: Settings, context: RequestContext, database_
             result_row_limit=settings.result_row_limit,
             result_summary_enabled=settings.result_summary_enabled,
             result_summary_max_chars=settings.result_summary_max_chars,
-            knowledge_retriever=get_knowledge_store(settings).retrieve,
+            knowledge_retriever=_safe_knowledge_retriever(settings),
             knowledge_top_k=settings.knowledge_top_k,
         )
         return graph, database, record.dialect
@@ -790,7 +801,7 @@ def _node_explanation(node: str, state: dict[str, Any]) -> str:
             return "仅根据已复核的结构化结果生成自然语言摘要。"
         return "摘要不可用，已保留安全结果并使用确定性回答。"
     if node == "general_answer":
-        return "使用通用问答模型回答，不读取 Schema 或访问数据库。"
+        return "使用通用问答模型回答，可参考知识资料，不读取 Schema 或访问数据库。"
     if node == "clarify":
         return "使用模型生成需要补充的信息，不读取 Schema 或访问数据库。"
     if node == "finalize":
