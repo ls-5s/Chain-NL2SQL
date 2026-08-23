@@ -15,6 +15,8 @@ class QueryStatus(str, Enum):
     SUCCEEDED = "succeeded"
     BLOCKED = "blocked"
     FAILED = "failed"
+    NEEDS_CLARIFICATION = "needs_clarification"
+    NO_GROUNDED_ANSWER = "no_grounded_answer"
 
 
 class QueryIntent(str, Enum):
@@ -22,6 +24,7 @@ class QueryIntent(str, Enum):
 
     DATA_QUERY = "data_query"
     GENERAL_CHAT = "general_chat"
+    CLARIFY = "clarify"
 
 
 class AnswerSource(str, Enum):

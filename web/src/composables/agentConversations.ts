@@ -2,6 +2,7 @@ import { computed, inject, provide, ref, type ComputedRef, type InjectionKey, ty
 
 import {
   createConversation as createConversationRequest,
+  bindConversationDatabase,
   deleteConversation as deleteConversationRequest,
   fetchConversation,
   fetchConversations,
@@ -15,7 +16,7 @@ import type {
   QueryStreamEvent,
 } from "@/types/api";
 
-const DEFAULT_DATABASE_ID = "demo";
+const DEFAULT_DATABASE_ID: string | null = null;
 
 export interface AgentChatMessage extends ConversationMessage {}
 
@@ -24,7 +25,7 @@ export interface AgentConversation {
   title: string;
   messages: AgentChatMessage[];
   draft: string;
-  databaseId: string;
+  databaseId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -44,7 +45,7 @@ export interface AgentConversationStore {
   selectConversation: (conversationId: string) => Promise<void>;
   deleteConversation: (conversationId: string) => Promise<void>;
   setDraft: (draft: string) => void;
-  setDatabaseId: (databaseId: string) => void;
+  setDatabaseId: (databaseId: string) => Promise<void>;
   sendQuestion: (
     question: string,
     onProgress: (event: QueryStreamEvent) => void,
@@ -200,9 +201,12 @@ export function createAgentConversationStore(): AgentConversationStore {
     drafts.value = { ...drafts.value, [conversationId]: value };
   }
 
-  function setDatabaseId(databaseId: string) {
+  async function setDatabaseId(databaseId: string) {
     if (activeDetail.value?.messages.length) return;
-    if (activeDetail.value) activeDetail.value.database_id = databaseId;
+    if (activeDetail.value) {
+      await bindConversationDatabase(activeDetail.value.id, databaseId);
+      activeDetail.value.database_id = databaseId;
+    }
   }
 
   async function sendQuestion(

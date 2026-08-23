@@ -30,9 +30,13 @@ const question = computed({
 });
 const databaseId = computed({
   get: () => store.activeConversation.value.databaseId,
-  set: (value: string) => store.setDatabaseId(value),
+  set: (value: string) => { void store.setDatabaseId(value); },
 });
 const loading = computed(() => store.isBusy.value);
+const clarificationRequired = computed(() => {
+  const response = [...messages.value].reverse().find((message) => message.response)?.response;
+  return response?.status === "needs_clarification";
+});
 const canSubmit = computed(
   () =>
     question.value.trim().length > 0 && !loading.value && Boolean(store.activeConversationId.value),
@@ -75,7 +79,7 @@ watch(
 onMounted(async () => {
   try {
     databases.value = await fetchDatabases();
-    if (databases.value.length && !databases.value.includes(databaseId.value))
+    if (databases.value.length && (!databaseId.value || !databases.value.includes(databaseId.value)))
       databaseId.value = databases.value[0];
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "无法加载数据库列表");
@@ -120,10 +124,20 @@ function handleSubmit() {
   void askQuestion();
 }
 
+function handleDatabaseChange(event: Event) {
+  const value = (event.target as HTMLSelectElement).value;
+  if (value) databaseId.value = value;
+}
+
 function statusLabel(status: QueryStatus) {
-  return { succeeded: "查询完成", blocked: "已拦截", failed: "执行失败", running: "处理中" }[
-    status
-  ];
+  return ({
+    succeeded: "查询完成",
+    blocked: "已拦截",
+    failed: "执行失败",
+    running: "处理中",
+    needs_clarification: "需要澄清",
+    no_grounded_answer: "暂无可验证资料",
+  } as Record<QueryStatus, string>)[status];
 }
 
 function statusClass(status: QueryStatus) {
@@ -131,12 +145,12 @@ function statusClass(status: QueryStatus) {
 }
 
 function intentLabel(intent: QueryIntent) {
-  return (
-    {
-      data_query: "数据查询",
-      general_chat: "通用回答",
-    }[intent] ?? "通用回答"
-  );
+  const labels: Record<QueryIntent, string> = {
+    data_query: "数据查询",
+    general_chat: "通用回答",
+    clarify: "需要澄清",
+  };
+  return labels[intent] ?? "通用回答";
 }
 
 function intentClass(intent: QueryIntent | string) {
@@ -273,7 +287,7 @@ async function scrollToBottom() {
 
             <div v-if="message.response?.intent === 'data_query'" class="response-card">
               <div class="response-card__header">
-                <div class="response-card__title"><Database :size="16" />{{ databaseId }}</div>
+                <div class="response-card__title"><Database :size="16" />{{ databaseId || "未选择数据库" }}</div>
                 <span :class="statusClass(message.response.status)"
                   >{{ intentLabel(message.response.intent) }} ·
                   {{ statusLabel(message.response.status) }}</span
@@ -343,6 +357,13 @@ async function scrollToBottom() {
     </div>
 
     <footer v-if="messages.length" class="composer-wrap">
+      <div v-if="clarificationRequired && databases.length" class="clarification-control">
+        <label for="clarification-database">选择数据库后重新提交</label>
+        <select id="clarification-database" :value="databaseId || ''" @change="handleDatabaseChange">
+          <option value="" disabled>选择数据库</option>
+          <option v-for="database in databases" :key="database" :value="database">{{ database }}</option>
+        </select>
+      </div>
       <form class="composer" @submit.prevent="handleSubmit">
         <div class="composer__main">
           <button
@@ -910,6 +931,22 @@ async function scrollToBottom() {
   margin: auto;
   padding: 12px 0 17px;
   background: linear-gradient(to bottom, rgba(255, 255, 255, 0), #fff 24%);
+}
+.clarification-control {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 10px;
+  color: #666;
+  font-size: 12px;
+}
+.clarification-control select {
+  min-height: 30px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 0 8px;
+  color: #333;
+  background: #fff;
 }
 .composer {
   padding: 9px 11px 8px;

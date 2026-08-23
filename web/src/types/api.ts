@@ -1,6 +1,6 @@
-export type QueryStatus = "running" | "succeeded" | "blocked" | "failed";
+export type QueryStatus = "running" | "succeeded" | "blocked" | "failed" | "needs_clarification" | "no_grounded_answer";
 
-export type QueryIntent = "data_query" | "general_chat";
+export type QueryIntent = "data_query" | "general_chat" | "clarify";
 
 export type AnswerSource = "general_llm" | "result_summary" | "deterministic_fallback";
 
@@ -20,7 +20,7 @@ export type ErrorCategory =
 
 export interface QueryRequest {
   question: string;
-  database_id: string;
+  database_id?: string | null;
   max_iterations?: number;
 }
 
@@ -100,6 +100,8 @@ export interface QueryResponse {
   generated_sql?: string | null;
   schema_summary?: SchemaSummary[];
   knowledge_hits?: KnowledgeHit[];
+  clarification_fields?: string[];
+  required_actions?: string[];
 }
 
 export interface QueryStreamEvent {
@@ -127,6 +129,7 @@ export interface QueryStreamEvent {
   confidence?: number;
   source?: "rule" | "llm";
   reason?: string;
+  phase?: "start" | "progress" | "complete" | "error";
 }
 
 export interface DatabaseListResponse {
@@ -168,7 +171,7 @@ export interface DatabaseUpdateRequest {
 export interface ConversationSummary {
   id: string;
   title: string;
-  database_id: string;
+  database_id: string | null;
   created_at: string;
   updated_at: string;
   message_count: number;
@@ -187,6 +190,7 @@ export interface ConversationMessage {
 
 export interface ConversationDetail extends ConversationSummary {
   messages: ConversationMessage[];
+  pending_clarification?: { fields?: string[]; required_actions?: string[] } | null;
 }
 
 export interface ResultReferenceResponse {

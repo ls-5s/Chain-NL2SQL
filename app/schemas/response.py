@@ -24,6 +24,8 @@ class QueryResponse(BaseModel):
     generated_sql: str | None = None
     trace: list[TraceEvent] = Field(default_factory=list)
     knowledge_hits: list[KnowledgeHit] = Field(default_factory=list)
+    clarification_fields: list[str] = Field(default_factory=list)
+    required_actions: list[str] = Field(default_factory=list)
 
 
 class KnowledgeDocumentResponse(BaseModel):
@@ -90,7 +92,7 @@ class MemberResponse(BaseModel):
 class ConversationSummary(BaseModel):
     id: str
     title: str
-    database_id: str
+    database_id: str | None
     created_at: str
     updated_at: str
     message_count: int = 0
@@ -109,6 +111,7 @@ class ConversationMessage(BaseModel):
 
 class ConversationDetail(ConversationSummary):
     messages: list[ConversationMessage] = Field(default_factory=list)
+    pending_clarification: dict[str, object] | None = None
 
 
 class ResultReferenceResponse(BaseModel):

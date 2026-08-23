@@ -10,6 +10,7 @@ from app.api.authorization import AccessPolicy
 from app.db.base import DatabaseExecutionError, DatabaseExecutor
 from app.graph.execution_node import make_execution_node
 from app.graph.finalize_node import make_finalize_node
+from app.graph.clarification_node import make_clarification_node
 from app.graph.general_answer_node import make_general_answer_node
 from app.graph.generation_node import make_generation_node
 from app.graph.intent_node import make_intent_gate_node
@@ -58,18 +59,18 @@ def build_query_graph(
     graph.add_node("repair_sql", make_repair_node(llm_client, model_timeout_seconds))
     graph.add_node("general_answer", make_general_answer_node(llm_client, model_timeout_seconds))
     graph.add_node("finalize", make_finalize_node())
-    if knowledge_retriever is not None:
-        graph.add_node("retrieve_knowledge", _retrieve_knowledge_node(knowledge_retriever, knowledge_top_k))
-        graph.set_entry_point("retrieve_knowledge")
-        graph.add_edge("retrieve_knowledge", "intent_gate")
-    else:
-        graph.set_entry_point("intent_gate")
+    graph.add_node("clarification_answer", make_clarification_node())
+    # Knowledge retrieval is deliberately outside the V1 agent graph.  An
+    # unprotected store must never influence routing or SQL generation.
+    graph.set_entry_point("intent_gate")
     graph.add_conditional_edges(
         "intent_gate",
         _route_after_intent,
         {
             QueryIntent.DATA_QUERY.value: "retrieve_schema",
             QueryIntent.GENERAL_CHAT.value: "general_answer",
+            QueryIntent.CLARIFY.value: "clarification_answer",
+            "needs_database": "clarification_answer",
         },
     )
     graph.add_conditional_edges(
@@ -92,6 +93,7 @@ def build_query_graph(
     graph.add_edge("summarize_result", "finalize")
     graph.add_edge("repair_sql", "validate_sql")
     graph.add_edge("general_answer", "finalize")
+    graph.add_edge("clarification_answer", "finalize")
     graph.add_edge("finalize", END)
     return graph.compile()
 
@@ -117,6 +119,10 @@ def _retrieve_knowledge_node(retriever: Callable[[str, int], list[KnowledgeHit]]
 
 def _route_after_intent(state: NL2SQLState) -> str:
     intent = state.get("intent", QueryIntent.GENERAL_CHAT)
+    if intent == QueryIntent.DATA_QUERY and not state.get("database_id"):
+        state["clarification_fields"] = ["数据库"]
+        state["required_actions"] = ["select_database"]
+        return "needs_database"
     return intent.value if isinstance(intent, QueryIntent) else str(intent)
 
 
@@ -149,6 +155,8 @@ def _route_after_result_guard(state: NL2SQLState) -> str:
 
 def _retrieve_schema_node(retriever: SchemaRetriever, access_policy: AccessPolicy):
     def retrieve(state: NL2SQLState) -> dict[str, object]:
+        if not state.get("database_id"):
+            return {"status": QueryStatus.NEEDS_CLARIFICATION, "required_actions": ["select_database"]}
         database_policy = access_policy.for_database(state["database_id"])
         request = SchemaRetrievalRequest(
             question=state["question"],

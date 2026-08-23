@@ -69,13 +69,14 @@ class ConversationRepository:
                 PRAGMA journal_mode = WAL;
                 CREATE TABLE IF NOT EXISTS conversation_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS conversations (
-                    id TEXT PRIMARY KEY, user_id TEXT NOT NULL, database_id TEXT NOT NULL,
+                    id TEXT PRIMARY KEY, user_id TEXT NOT NULL, database_id TEXT,
                     title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS conversation_turns (
                     id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
                     sequence INTEGER NOT NULL, status TEXT NOT NULL, context_snapshot TEXT NOT NULL DEFAULT '',
-                    created_at TEXT NOT NULL, completed_at TEXT, UNIQUE(conversation_id, sequence)
+                    created_at TEXT NOT NULL, completed_at TEXT, client_request_id TEXT,
+                    UNIQUE(conversation_id, sequence), UNIQUE(conversation_id, client_request_id)
                 );
                 CREATE TABLE IF NOT EXISTS conversation_messages (
                     id TEXT PRIMARY KEY, turn_id TEXT NOT NULL REFERENCES conversation_turns(id) ON DELETE CASCADE,
@@ -98,6 +99,17 @@ class ConversationRepository:
                 CREATE INDEX IF NOT EXISTS idx_turns_conversation ON conversation_turns(conversation_id, sequence DESC);
                 """
             )
+            # Migrations for repositories created by earlier V1 builds.
+            for statement in (
+                "ALTER TABLE conversation_turns ADD COLUMN client_request_id TEXT",
+                "ALTER TABLE conversations ADD COLUMN database_version INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE conversations ADD COLUMN pending_clarification_json TEXT",
+            ):
+                try:
+                    connection.execute(statement)
+                except sqlite3.OperationalError:
+                    pass
+            connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_turn_request ON conversation_turns(conversation_id, client_request_id) WHERE client_request_id IS NOT NULL")
             connection.execute("INSERT OR REPLACE INTO conversation_meta(key, value) VALUES ('schema_version', '1')")
             self._recover_running_turns(connection)
 
@@ -127,7 +139,7 @@ class ConversationRepository:
             [(now, row["conversation_id"]) for row in turn_rows],
         )
 
-    def create_conversation(self, user_id: str, database_id: str) -> dict[str, Any]:
+    def create_conversation(self, user_id: str, database_id: str | None = None) -> dict[str, Any]:
         now = _now()
         record = {"id": str(uuid4()), "title": "新聊天", "database_id": database_id, "created_at": now, "updated_at": now, "message_count": 0}
         with self._connection() as connection:
@@ -151,7 +163,7 @@ class ConversationRepository:
     def get_conversation(self, user_id: str, conversation_id: str) -> dict[str, Any]:
         with self._connection() as connection:
             conversation = connection.execute(
-                "SELECT id, title, database_id, created_at, updated_at FROM conversations WHERE id = ? AND user_id = ?",
+                "SELECT id, title, database_id, created_at, updated_at, pending_clarification_json FROM conversations WHERE id = ? AND user_id = ?",
                 (conversation_id, user_id),
             ).fetchone()
             if not conversation:
@@ -171,6 +183,7 @@ class ConversationRepository:
                 "created_at": row["created_at"],
             })
         result = dict(conversation)
+        result["pending_clarification"] = json.loads(result.pop("pending_clarification_json")) if result.get("pending_clarification_json") else None
         result["message_count"] = len(messages)
         result["messages"] = messages
         return result
@@ -182,7 +195,7 @@ class ConversationRepository:
             if cursor.rowcount != 1:
                 raise ConversationNotFoundError(conversation_id)
 
-    def start_turn(self, user_id: str, conversation_id: str, question: str, context_snapshot: str) -> dict[str, Any]:
+    def start_turn(self, user_id: str, conversation_id: str, question: str, context_snapshot: str, client_request_id: str | None = None) -> dict[str, Any]:
         now = _now()
         turn_id, user_message_id, assistant_message_id = str(uuid4()), str(uuid4()), str(uuid4())
         with self._connection() as connection:
@@ -194,13 +207,21 @@ class ConversationRepository:
             ).fetchone()
             if not conversation:
                 raise ConversationNotFoundError(conversation_id)
+            if client_request_id:
+                existing = connection.execute(
+                    "SELECT t.id, t.conversation_id, c.database_id FROM conversation_turns t JOIN conversations c ON c.id = t.conversation_id WHERE t.conversation_id = ? AND t.client_request_id = ?",
+                    (conversation_id, client_request_id),
+                ).fetchone()
+                if existing:
+                    messages = connection.execute("SELECT id FROM conversation_messages WHERE turn_id = ? AND role = 'assistant'", (existing["id"],)).fetchone()
+                    return {"conversation_id": conversation_id, "turn_id": existing["id"], "assistant_message_id": messages["id"], "database_id": existing["database_id"], "existing": True}
             sequence = connection.execute(
                 "SELECT COALESCE(MAX(sequence), 0) + 1 FROM conversation_turns WHERE conversation_id = ?", (conversation_id,)
             ).fetchone()[0]
             title = question.strip()[:24] if conversation["title"] == "新聊天" else conversation["title"]
             connection.execute(
-                "INSERT INTO conversation_turns(id, conversation_id, sequence, status, context_snapshot, created_at) VALUES (?, ?, ?, 'running', ?, ?)",
-                (turn_id, conversation_id, sequence, context_snapshot, now),
+                "INSERT INTO conversation_turns(id, conversation_id, sequence, status, context_snapshot, created_at, client_request_id) VALUES (?, ?, ?, 'running', ?, ?, ?)",
+                (turn_id, conversation_id, sequence, context_snapshot, now, client_request_id),
             )
             connection.executemany(
                 "INSERT INTO conversation_messages(id, turn_id, role, content, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -212,7 +233,32 @@ class ConversationRepository:
             "turn_id": turn_id,
             "assistant_message_id": assistant_message_id,
             "database_id": conversation["database_id"],
+            "existing": False,
         }
+
+    def bind_database(self, user_id: str, conversation_id: str, database_id: str) -> bool:
+        """Bind an unbound conversation exactly once under a write lock."""
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            cursor = connection.execute(
+                "UPDATE conversations SET database_id = ?, database_version = database_version + 1, updated_at = ? WHERE id = ? AND user_id = ? AND database_id IS NULL",
+                (database_id, _now(), conversation_id, user_id),
+            )
+            if cursor.rowcount == 1:
+                return True
+            row = connection.execute("SELECT 1 FROM conversations WHERE id = ? AND user_id = ?", (conversation_id, user_id)).fetchone()
+            if not row:
+                raise ConversationNotFoundError(conversation_id)
+            return False
+
+    def set_pending_clarification(self, user_id: str, conversation_id: str, pending: dict[str, object] | None) -> None:
+        with self._connection() as connection:
+            cursor = connection.execute(
+                "UPDATE conversations SET pending_clarification_json = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+                (json.dumps(pending, ensure_ascii=False) if pending else None, _now(), conversation_id, user_id),
+            )
+            if cursor.rowcount != 1:
+                raise ConversationNotFoundError(conversation_id)
 
     def append_progress(self, assistant_message_id: str, progress: Mapping[str, Any]) -> None:
         with self._connection() as connection:
@@ -243,7 +289,13 @@ class ConversationRepository:
                 (content, status, response_json, assistant_message_id),
             )
             connection.execute("UPDATE conversation_turns SET status = ?, completed_at = ? WHERE id = ?", (status, now, turn_id))
-            connection.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, row["conversation_id"]))
+            pending = None
+            if response and response.status.value == "needs_clarification":
+                pending = {"fields": response.clarification_fields, "required_actions": response.required_actions}
+            connection.execute(
+                "UPDATE conversations SET updated_at = ?, pending_clarification_json = ? WHERE id = ?",
+                (now, json.dumps(pending, ensure_ascii=False) if pending else None, row["conversation_id"]),
+            )
             self._store_memory(connection, turn_id, row["conversation_id"], row["question"], response)
 
     def _store_memory(self, connection: sqlite3.Connection, turn_id: str, conversation_id: str, question: str, response: QueryResponse | None) -> None:

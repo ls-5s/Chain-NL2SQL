@@ -192,12 +192,20 @@ export async function fetchConversations(): Promise<ConversationSummary[]> {
   }
 }
 
-export async function createConversation(databaseId: string): Promise<ConversationSummary> {
+export async function createConversation(databaseId?: string | null): Promise<ConversationSummary> {
   try {
     const { data } = await client.post<ConversationSummary>("/conversations", {
-      database_id: databaseId,
+      database_id: databaseId ?? null,
     });
     return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+export async function bindConversationDatabase(conversationId: string, databaseId: string): Promise<void> {
+  try {
+    await client.post(`/conversations/${conversationId}/database`, { database_id: databaseId });
   } catch (error) {
     throw toApiError(error);
   }
@@ -308,7 +316,7 @@ export async function streamQuery(
 
 export async function streamConversationQuery(
   conversationId: string,
-  payload: { question: string; max_iterations?: number; reference_ids?: string[] },
+  payload: { question: string; max_iterations?: number; reference_ids?: string[]; client_request_id?: string },
   onProgress: (event: QueryStreamEvent) => void,
 ): Promise<QueryResponse> {
   return streamSse(`/api/v1/conversations/${conversationId}/query`, payload, onProgress);

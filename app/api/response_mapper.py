@@ -39,6 +39,8 @@ def map_query_state(state: dict[str, Any]) -> QueryResponse:
         generated_sql=state.get("generated_sql"),
         trace=state.get("trace", []),
         knowledge_hits=state.get("knowledge_hits", []),
+        clarification_fields=state.get("clarification_fields", []),
+        required_actions=state.get("required_actions", []),
     )
 
 

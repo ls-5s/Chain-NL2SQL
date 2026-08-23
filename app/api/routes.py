@@ -18,6 +18,7 @@ from app.conversations.repository import ConversationNotFoundError, Conversation
 from app.db.sqlite_adapter import SQLiteAdapter
 from app.db.mysql_adapter import MySQLAdapter
 from app.graph.builder import build_query_graph
+from app.graph.intent_node import make_intent_gate_node
 from app.graph.state import NL2SQLState, create_initial_state
 from app.knowledge.service import KnowledgeBusyError, get_knowledge_store
 from app.llm.factory import LLMConfigurationError, create_openai_client
@@ -343,73 +344,71 @@ async def query(
     context: RequestContext = Depends(get_request_context),
 ) -> StreamingResponse:
     settings = get_settings()
-    if payload.database_id not in context.access_policy.allowed_database_ids:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Database is not allowed.")
-    record = get_database_registry(settings).get(payload.database_id)
-    if record is None or not record.enabled:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Database adapter is not configured.")
-    try:
-        database = _adapter_for_registration(record, settings)
-    except NotImplementedError as error:
-        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(error)) from error
+    registry = get_database_registry(settings)
+    record = registry.get(payload.database_id) if payload.database_id else None
     try:
         llm_client = create_openai_client(settings)
-        def embedding_factory() -> SentenceTransformerEmbedding:
-            name = settings.schema_embedding_model
-            with _provider_lock:
-                provider = _embedding_providers.get(name)
-                if provider is None:
-                    provider = SentenceTransformerEmbedding(name)
-                    _embedding_providers[name] = provider
-                return provider
-
-        def reranker_factory() -> SentenceTransformerReranker:
-            name = settings.schema_reranker_model
-            with _provider_lock:
-                provider = _reranker_providers.get(name)
-                if provider is None:
-                    provider = SentenceTransformerReranker(name)
-                    _reranker_providers[name] = provider
-                return provider
-
-        schema_retriever = SchemaIndexManager(
-            database.inspect_schema,
-            root=settings.schema_index_root,
-            mode=settings.schema_retrieval_mode,
-            top_k=settings.schema_top_k,
-            fallback_mode=settings.schema_fallback_mode,
-            embedding_factory=embedding_factory,
-            reranker_factory=reranker_factory,
-            embedding_model_name=settings.schema_embedding_model,
-            reranker_model_name=settings.schema_reranker_model,
+        state = create_initial_state(
+            request_id=context.request_id,
+            question=payload.question,
+            database_id=payload.database_id,
+            dialect=record.dialect if record else "",
+            max_iterations=payload.max_iterations or settings.max_iterations,
         )
-        graph = build_query_graph(
-            database_executor=database,
-            llm_client=llm_client,
-            schema_retriever=schema_retriever,
-            access_policy=context.access_policy,
-            query_timeout_seconds=settings.query_timeout_seconds,
-            intent_confidence_threshold=settings.intent_confidence_threshold,
-            result_row_limit=settings.result_row_limit,
-            result_summary_enabled=settings.result_summary_enabled,
-            result_summary_max_chars=settings.result_summary_max_chars,
-            knowledge_retriever=_safe_knowledge_retriever(settings),
-            knowledge_top_k=settings.knowledge_top_k,
-        )
+        state.update(make_intent_gate_node(llm_client, settings.query_timeout_seconds, settings.intent_confidence_threshold)(state))
+        intent_value = state.get("intent")
+        is_data = intent_value == "data_query" or getattr(intent_value, "value", None) == "data_query"
+        if is_data and not payload.database_id:
+            database = _NoopDatabase()
+            graph = build_query_graph(
+                database_executor=database,
+                llm_client=llm_client,
+                schema_retriever=_NoopSchemaRetriever(),
+                access_policy=context.access_policy,
+                query_timeout_seconds=settings.query_timeout_seconds,
+                intent_confidence_threshold=settings.intent_confidence_threshold,
+                result_row_limit=settings.result_row_limit,
+                result_summary_enabled=settings.result_summary_enabled,
+                result_summary_max_chars=settings.result_summary_max_chars,
+            )
+        elif not is_data:
+            database = _NoopDatabase()
+            graph = build_query_graph(
+                database_executor=database,
+                llm_client=llm_client,
+                schema_retriever=_NoopSchemaRetriever(),
+                access_policy=context.access_policy,
+                query_timeout_seconds=settings.query_timeout_seconds,
+                intent_confidence_threshold=settings.intent_confidence_threshold,
+                result_row_limit=settings.result_row_limit,
+                result_summary_enabled=settings.result_summary_enabled,
+                result_summary_max_chars=settings.result_summary_max_chars,
+            )
+        else:
+            if payload.database_id not in context.access_policy.allowed_database_ids:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Database is not allowed.")
+            if record is None or not record.enabled:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Database adapter is not configured.")
+            database = _adapter_for_registration(record, settings)
+            graph = _build_graph_for_database(settings, context, record, database, llm_client)
     except LLMConfigurationError as error:
-        database.close()
+        if 'database' in locals():
+            database.close()
         raise HTTPException(status_code=503, detail="LLM service is not configured.") from error
     except ValueError as error:
-        database.close()
+        if 'database' in locals():
+            database.close()
         raise HTTPException(status_code=400, detail=str(error)) from error
+    except HTTPException:
+        if 'database' in locals():
+            database.close()
+        raise
+    except Exception as error:
+        if 'database' in locals():
+            database.close()
+        _log_agent_exception(error, request_id=context.request_id, node="intent_gate")
+        raise HTTPException(status_code=502, detail=_GENERIC_AGENT_ERROR) from error
 
-    state = create_initial_state(
-        request_id=context.request_id,
-        question=payload.question,
-        database_id=payload.database_id,
-        dialect=record.dialect,
-        max_iterations=payload.max_iterations or settings.max_iterations,
-    )
     return StreamingResponse(
         _stream_graph(graph, state, database),
         media_type="text/event-stream",
@@ -431,6 +430,8 @@ def create_conversation(
     payload: ConversationCreateRequest, context: RequestContext = Depends(get_request_context)
 ) -> dict[str, Any]:
     database_id = payload.database_id
+    if database_id is None:
+        return _conversation_repository(get_settings()).create_conversation(context.user_id, None)
     if database_id not in context.access_policy.allowed_database_ids:
         active_database_ids = tuple(context.access_policy.allowed_database_ids)
         if database_id == "demo" and len(active_database_ids) == 1:
@@ -438,6 +439,22 @@ def create_conversation(
         else:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Database is not allowed.")
     return _conversation_repository(get_settings()).create_conversation(context.user_id, database_id)
+
+
+@api_router.post("/conversations/{conversation_id}/database")
+def bind_conversation_database(
+    conversation_id: str,
+    payload: dict[str, str],
+    context: RequestContext = Depends(get_request_context),
+) -> dict[str, object]:
+    database_id = payload.get("database_id")
+    if not database_id or database_id not in context.access_policy.allowed_database_ids:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Database is not allowed.")
+    try:
+        bound = _conversation_repository(get_settings()).bind_database(context.user_id, conversation_id, database_id)
+    except ConversationNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation was not found.") from error
+    return {"bound": bound, "database_id": database_id}
 
 
 @api_router.get("/conversations/{conversation_id}", response_model=ConversationDetail)
@@ -482,14 +499,42 @@ async def conversation_query(
         conversation_context, bindings = repository.build_context(
             context.user_id, conversation_id, payload.question, settings.conversation_context_max_chars, payload.reference_ids
         )
-        turn = repository.start_turn(context.user_id, conversation_id, payload.question, conversation_context)
+        turn = repository.start_turn(context.user_id, conversation_id, payload.question, conversation_context, payload.client_request_id)
     except ConversationNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation was not found.") from error
     except Exception as error:
         _log_agent_exception(error, request_id=context.request_id, conversation_id=conversation_id, node="build_context")
         raise HTTPException(status_code=502, detail=_GENERIC_AGENT_ERROR) from error
+    if turn.get("existing"):
+        try:
+            detail = repository.get_conversation(context.user_id, conversation_id)
+            message = next((item for item in detail["messages"] if item["turn_id"] == turn["turn_id"] and item["role"] == "assistant"), None)
+            if message and message.get("response"):
+                return StreamingResponse(
+                    _stream_existing_response(context.request_id, message["response"], conversation_id, turn["turn_id"], turn["assistant_message_id"]),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+                )
+        except Exception as error:
+            _log_agent_exception(error, request_id=context.request_id, conversation_id=conversation_id, turn_id=turn["turn_id"], node="idempotency_replay")
     try:
-        graph, database, dialect = _create_graph_runtime(settings, context, turn["database_id"])
+        if turn["database_id"] is None:
+            llm_client = create_openai_client(settings)
+            database = _NoopDatabase()
+            graph = build_query_graph(
+                database_executor=database,
+                llm_client=llm_client,
+                schema_retriever=_NoopSchemaRetriever(),
+                access_policy=context.access_policy,
+                query_timeout_seconds=settings.query_timeout_seconds,
+                intent_confidence_threshold=settings.intent_confidence_threshold,
+                result_row_limit=settings.result_row_limit,
+                result_summary_enabled=settings.result_summary_enabled,
+                result_summary_max_chars=settings.result_summary_max_chars,
+            )
+            dialect = ""
+        else:
+            graph, database, dialect = _create_graph_runtime(settings, context, turn["database_id"])
     except LLMConfigurationError as error:
         _log_agent_exception(error, request_id=context.request_id, conversation_id=conversation_id, turn_id=turn["turn_id"], node="create_graph_runtime")
         _finish_turn_safely(repository, turn, "LLM service is not configured.", request_id=context.request_id)
@@ -550,13 +595,14 @@ async def _stream_graph(
     current_state: dict[str, Any] = dict(state)
     current_node: str | None = None
     try:
-        yield _sse("start", {"request_id": state["request_id"], **(start_data or {})})
+        yield _sse("start", {"request_id": state["request_id"], "phase": "start", **(start_data or {})})
         async for update in graph.astream(state, stream_mode="updates"):
             for node, node_update in update.items():
                 current_node = node
                 current_state.update(node_update)
                 progress: dict[str, Any] = {
                     "request_id": state["request_id"],
+                    "phase": "progress",
                     "node": node,
                     "status": _json_value(current_state.get("status", "running")),
                     "iteration": current_state.get("iteration", 0),
@@ -596,7 +642,9 @@ async def _stream_graph(
         response = map_query_state(current_state)
         if on_complete:
             on_complete(response)
-        yield _sse("complete", response.model_dump(mode="json"))
+        complete_data = response.model_dump(mode="json")
+        complete_data.update({"request_id": state["request_id"], "phase": "complete"})
+        yield _sse("complete", complete_data)
     except asyncio.CancelledError as error:
         _log_agent_exception(
             error,
@@ -619,7 +667,7 @@ async def _stream_graph(
         )
         if on_error:
             on_error("LLM service is not configured.")
-        yield _sse("error", {"status_code": 503, "detail": "LLM service is not configured."})
+        yield _sse("error", {"request_id": state["request_id"], "phase": "error", "status_code": 503, "detail": "LLM service is not configured."})
     except Exception as error:
         _log_agent_exception(
             error,
@@ -630,9 +678,25 @@ async def _stream_graph(
         )
         if on_error:
             on_error(_GENERIC_AGENT_ERROR)
-        yield _sse("error", {"status_code": 502, "detail": _GENERIC_AGENT_ERROR})
+        yield _sse("error", {"request_id": state["request_id"], "phase": "error", "status_code": 502, "detail": _GENERIC_AGENT_ERROR})
     finally:
-        database.close()
+        try:
+            database.close()
+        except Exception as close_error:
+            _log_agent_exception(
+                close_error,
+                request_id=state["request_id"],
+                conversation_id=(start_data or {}).get("conversation_id"),
+                turn_id=(start_data or {}).get("turn_id"),
+                node="close_database",
+            )
+
+
+async def _stream_existing_response(request_id: str, response: Any, conversation_id: str, turn_id: str, message_id: str) -> AsyncIterator[str]:
+    yield _sse("start", {"request_id": request_id, "phase": "start", "conversation_id": conversation_id, "turn_id": turn_id, "message_id": message_id})
+    payload = response.model_dump(mode="json") if hasattr(response, "model_dump") else dict(response)
+    payload.update({"request_id": request_id, "phase": "complete"})
+    yield _sse("complete", payload)
 
 
 def _sse(event: str, data: dict[str, Any]) -> str:
@@ -741,6 +805,61 @@ def _create_graph_runtime(settings: Settings, context: RequestContext, database_
         raise
 
 
+class _NoopDatabase:
+    """Placeholder runtime for non-data paths; every database operation fails closed."""
+
+    def inspect_schema(self, database_id: str):
+        raise AssertionError("non-data path must not inspect schema")
+
+    def execute_readonly(self, *args, **kwargs):
+        raise AssertionError("non-data path must not execute SQL")
+
+    def close(self) -> None:
+        return None
+
+
+class _NoopSchemaRetriever:
+    def retrieve(self, *args, **kwargs):
+        raise AssertionError("non-data path must not retrieve schema")
+
+
+def _build_graph_for_database(settings: Settings, context: RequestContext, record: Any, database: Any, llm_client: Any) -> Any:
+    def embedding_factory() -> SentenceTransformerEmbedding:
+        return _embedding_provider(settings)
+
+    def reranker_factory() -> SentenceTransformerReranker:
+        name = settings.schema_reranker_model
+        with _provider_lock:
+            provider = _reranker_providers.get(name)
+            if provider is None:
+                provider = SentenceTransformerReranker(name)
+                _reranker_providers[name] = provider
+            return provider
+
+    schema_retriever = SchemaIndexManager(
+        database.inspect_schema,
+        root=settings.schema_index_root,
+        mode=settings.schema_retrieval_mode,
+        top_k=settings.schema_top_k,
+        fallback_mode=settings.schema_fallback_mode,
+        embedding_factory=embedding_factory,
+        reranker_factory=reranker_factory,
+        embedding_model_name=settings.schema_embedding_model,
+        reranker_model_name=settings.schema_reranker_model,
+    )
+    return build_query_graph(
+        database_executor=database,
+        llm_client=llm_client,
+        schema_retriever=schema_retriever,
+        access_policy=context.access_policy,
+        query_timeout_seconds=settings.query_timeout_seconds,
+        intent_confidence_threshold=settings.intent_confidence_threshold,
+        result_row_limit=settings.result_row_limit,
+        result_summary_enabled=settings.result_summary_enabled,
+        result_summary_max_chars=settings.result_summary_max_chars,
+    )
+
+
 def _node_message(node: str) -> str:
     return {
         "retrieve_knowledge": "正在检索知识资料",
@@ -753,6 +872,7 @@ def _node_message(node: str) -> str:
         "result_guard": "正在复核结果安全性",
         "summarize_result": "正在生成结果摘要",
         "general_answer": "正在生成通用回答",
+        "clarification_answer": "正在整理需要补充的信息",
         "finalize": "正在整理查询结果",
     }.get(node, "正在处理查询")
 
@@ -765,6 +885,8 @@ def _node_explanation(node: str, state: dict[str, Any]) -> str:
             return f"问题明确需要本地业务数据（{source} 判断），将进入受控 NL2SQL 流程。"
         if intent == "general_chat":
             return "问题不需要本地业务数据，将交由通用问答模型处理。"
+        if intent == "clarify":
+            return "当前信息不足以安全执行请求，已生成澄清要求。"
         if state.get("intent_classification_valid") is False:
             return "分类置信度不足或格式无效，已转为通用回答，不访问数据库。"
         return "问题信息不足，将交由通用问答模型处理。"

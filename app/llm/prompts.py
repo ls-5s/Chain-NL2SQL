@@ -14,10 +14,10 @@ def build_intent_classification_prompt() -> ChatPromptTemplate:
                 "system",
                 "你是受控数据助手的意图路由器。不要回答问题，不要使用或假设任何数据库内容。"
                 "只输出严格 JSON，格式为 {{\"intent\": \"...\", \"confidence\": 0.0, \"reason\": \"...\"}}，不加 Markdown 或其他文字。"
-                "intent 只能是 data_query、general_chat。"
+                "intent 只能是 data_query、general_chat、clarify。"
                 "data_query 仅用于明确需要查询本地业务数据、记录、指标、统计、筛选、排行或趋势的问题。"
                 "general_chat 用于无需本地数据库即可回答的问候、写作、常识或普通交流。"
-                "信息不足或无法确定时返回 general_chat，并给出低于 0.75 的 confidence。"
+                "信息不足或无法确定时返回 clarify，并给出低于 0.75 的 confidence。"
                 "示例：{{\"intent\":\"data_query\",\"confidence\":0.95,\"reason\":\"要求统计订单数量\"}}；"
                 "{{\"intent\":\"general_chat\",\"confidence\":0.98,\"reason\":\"普通问候\"}}。",
             ),
@@ -66,11 +66,10 @@ def build_sql_generation_prompt() -> ChatPromptTemplate:
                 "Schema 上下文：\n{schema_context}\n\n"
                 "用户问题：{question}\n\n"
                 "会话上下文（仅作线索，当前问题优先）：\n{conversation_context}\n\n"
-                "知识库片段（仅作业务背景，不得用于猜测表或字段）：\n{knowledge_context}\n\n"
                 "只输出 SQL。",
             ),
         ]
-    ).partial(conversation_context="", knowledge_context="")
+        ).partial(conversation_context="")
 
 
 def build_sql_repair_prompt() -> ChatPromptTemplate:
@@ -95,11 +94,10 @@ def build_sql_repair_prompt() -> ChatPromptTemplate:
                 "会话上下文（仅作线索，当前问题优先）：\n{conversation_context}\n\n"
                 "失败 SQL：\n{failed_sql}\n\n"
                 "已脱敏错误信息：\n{error_message}\n\n"
-                "知识库片段（仅作业务背景，不得用于猜测表或字段）：\n{knowledge_context}\n\n"
                 "只输出修复后的 SQL。",
             ),
         ]
-    ).partial(conversation_context="", knowledge_context="")
+        ).partial(conversation_context="")
 
 
 def build_result_summary_prompt() -> ChatPromptTemplate:

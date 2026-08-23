@@ -35,17 +35,17 @@ def classify_by_rules(question: str) -> RuleDecision | None:
         return RuleDecision(QueryIntent.GENERAL_CHAT, 0.98, "命中通用问答或写作表达")
 
     if any(pattern in text for pattern in _AMBIGUOUS_PATTERNS):
-        return RuleDecision(QueryIntent.GENERAL_CHAT, 0.92, "表达了查看或总结意图，但缺少明确查询目标")
+        return RuleDecision(QueryIntent.CLARIFY, 0.92, "表达了查看或总结意图，但缺少明确查询目标")
 
     has_action = any(action in text for action in _DATA_ACTIONS)
     has_object = any(obj in text for obj in _DATA_OBJECTS)
     if "数据" in text and not has_object:
-        return RuleDecision(QueryIntent.GENERAL_CHAT, 0.90, "只有泛化的数据对象，没有明确业务指标")
+        return RuleDecision(QueryIntent.CLARIFY, 0.90, "只有泛化的数据对象，没有明确业务指标")
     if has_action and has_object and not ("分析" in text and not any(term in text for term in _DETAIL_TERMS)):
         return RuleDecision(QueryIntent.DATA_QUERY, 0.96, "同时包含数据查询动作和业务数据对象")
 
     # A business-data mention without a concrete operation is deliberately ambiguous.
     if has_object:
-        return RuleDecision(QueryIntent.GENERAL_CHAT, 0.90, "提到了业务数据对象，但缺少明确查询目标")
+        return RuleDecision(QueryIntent.CLARIFY, 0.90, "提到了业务数据对象，但缺少明确查询目标")
 
     return None

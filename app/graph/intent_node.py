@@ -16,35 +16,47 @@ def make_intent_gate_node(llm_client: LLMClient, timeout_seconds: float, confide
     prompt_template = build_intent_classification_prompt()
 
     def classify(state: NL2SQLState) -> dict[str, object]:
+        # The API may preflight this gate before a database runtime exists.
+        if state.get("intent") is not None:
+            return {"intent": state["intent"]}
         rule_decision = classify_by_rules(state["question"])
         if rule_decision is not None:
-            return {
+            result = {
                 "intent": rule_decision.intent,
                 "intent_confidence": rule_decision.confidence,
                 "intent_reason": rule_decision.reason,
                 "intent_source": "rule",
                 "intent_classification_valid": True,
             }
+            if any(term in state["question"] for term in ("内部资料", "公司制度", "内部知识", "政策文档", "知识库")):
+                result["knowledge_policy"] = "required"
+            return result
         response = llm_client.generate(
             prompt_template.invoke({"question": state["question"], "conversation_context": state.get("conversation_context", "")}),
             timeout_seconds=timeout_seconds,
         )
         parsed = _parse_intent(response.content)
         if parsed is None or parsed["confidence"] < confidence_threshold:
-            return {
-                "intent": QueryIntent.GENERAL_CHAT,
+            result = {
+                "intent": QueryIntent.CLARIFY,
                 "intent_confidence": parsed["confidence"] if parsed else 0.0,
                 "intent_reason": "LLM 分类置信度不足或输出格式无效",
                 "intent_source": "llm",
                 "intent_classification_valid": False,
             }
-        return {
+            if any(term in state["question"] for term in ("内部资料", "公司制度", "内部知识", "政策文档", "知识库")):
+                result["knowledge_policy"] = "required"
+            return result
+        result = {
             "intent": parsed["intent"],
             "intent_confidence": parsed["confidence"],
             "intent_reason": parsed["reason"],
             "intent_source": "llm",
             "intent_classification_valid": True,
         }
+        if any(term in state["question"] for term in ("内部资料", "公司制度", "内部知识", "政策文档", "知识库")):
+            result["knowledge_policy"] = "required"
+        return result
 
     return classify
 
