@@ -40,6 +40,7 @@ class KnowledgeDocumentResponse(BaseModel):
     chunk_count: int = 0
     summary: str = ""
     failure_message: str | None = None
+    acl: dict[str, object] | None = None
 
 
 class HealthResponse(BaseModel):
