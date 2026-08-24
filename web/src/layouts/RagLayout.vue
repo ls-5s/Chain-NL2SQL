@@ -45,10 +45,22 @@ const failedCount = computed(
       </header>
       <div class="rag-sidebar__body">
         <section class="rag-sidebar__stats" aria-label="资料库概览">
-          <div><strong>{{ documents.length }}</strong><span>资料总数</span></div>
-          <div><strong>{{ indexedCount }}</strong><span>已完成索引</span></div>
-          <div><strong>{{ processingCount }}</strong><span>处理中</span></div>
-          <div><strong>{{ failedCount }}</strong><span>需要处理</span></div>
+          <div>
+            <strong>{{ documents.length }}</strong
+            ><span>资料总数</span>
+          </div>
+          <div>
+            <strong>{{ indexedCount }}</strong
+            ><span>已完成索引</span>
+          </div>
+          <div>
+            <strong>{{ processingCount }}</strong
+            ><span>处理中</span>
+          </div>
+          <div>
+            <strong>{{ failedCount }}</strong
+            ><span>需要处理</span>
+          </div>
         </section>
         <div class="filters">
           <label class="search-field">
@@ -239,6 +251,14 @@ const failedCount = computed(
   border-color: rgba(205, 226, 211, 0.18);
   color: #c4d3c8;
   background: rgba(5, 15, 10, 0.24);
+}
+.rag-sidebar .filters select option {
+  color: #edf5ef;
+  background-color: #182820;
+}
+.rag-sidebar .filters select option:checked {
+  color: #ffffff;
+  background-color: #326d4c;
 }
 .search-field {
   display: flex;
