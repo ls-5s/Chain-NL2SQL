@@ -156,6 +156,18 @@ KNOWLEDGE_CHUNK_OVERLAP=120
 
 ## 9. 测试与验收
 
+### Demo 业务知识种子
+
+Demo SQLite 数据库和对应业务知识资料可以重复生成：
+
+```powershell
+.venv\Scripts\python.exe scripts\init_demo_db.py
+.venv\Scripts\python.exe scripts\seed_demo_knowledge.py
+.venv\Scripts\python.exe scripts\build_demo_schema_rag.py
+```
+
+种子资料位于 `data/knowledge_sources/`，包括销售指标口径、订单状态规则和 Demo 数据字典；索引完成后资料 ACL 为 `all_authenticated`，可直接用于登录用户的 grounded answer 测试。
+
 后端 [`tests/unit/test_knowledge.py`](../tests/unit/test_knowledge.py) 和 [`tests/unit/test_knowledge_v2.py`](../tests/unit/test_knowledge_v2.py) 覆盖 Markdown 上传、异步索引、BM25 检索、默认拒绝、role/user ACL、撤权、重建失败保留旧索引和 Grounded 引用拒答。前端 [`web/src/tests/ragView.spec.ts`](../web/src/tests/ragView.spec.ts) 覆盖空态、成员只读、管理员上传、轮询收敛和 ACL 保存。
 
 推荐执行：

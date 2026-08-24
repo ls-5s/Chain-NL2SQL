@@ -109,7 +109,11 @@ def _retrieve_knowledge_node(retriever: Callable[[str, int], list[KnowledgeHit]]
         if retriever is None:
             return {"knowledge_hits": [], "knowledge_context": "", "knowledge_retrieval_error": "knowledge_unavailable"}
         try:
-            hits = retriever(state["question"], top_k)
+            # BM25/lexical retrieval can return weak matches for shared
+            # Chinese stop characters.  Only pass materially relevant, ACL-
+            # filtered evidence to the grounded-answer model; otherwise a
+            # no-hit question could be answered from an unrelated document.
+            hits = [hit for hit in retriever(state["question"], top_k) if hit.relevance >= 0.45]
             context = "\n\n".join(
                 f"文档：{hit.title}\n分类：{hit.category}\n片段：{hit.excerpt}" for hit in hits
             )[:6000]

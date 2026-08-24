@@ -22,6 +22,7 @@ import {
   updateDatabaseTableAccess,
 } from "@/api/client";
 import { getDemoRole } from "@/auth/auth";
+import DatabaseLayout from "@/layouts/DatabaseLayout.vue";
 import type { Database, DatabaseDialect } from "@/types/api";
 
 const databases = ref<Database[]>([]);
@@ -30,6 +31,9 @@ const loading = ref(true);
 const saving = ref(false);
 const testingId = ref("");
 const activatingId = ref("");
+const batchUpdating = ref(false);
+const batchMessage = ref("");
+const tableFilter = ref<"all" | "enabled" | "disabled">("all");
 const errorMessage = ref("");
 const modalOpen = ref(false);
 const editingDatabase = ref<Database | null>(null);
@@ -56,6 +60,17 @@ const selectedDatabase = computed(
 const enabledTableCount = computed(
   () => selectedDatabase.value?.tables.filter((table) => table.agent_access).length ?? 0,
 );
+const filteredTables = computed(() => {
+  const tables = selectedDatabase.value?.tables ?? [];
+  if (tableFilter.value === "enabled") return tables.filter((table) => table.agent_access);
+  if (tableFilter.value === "disabled") return tables.filter((table) => !table.agent_access);
+  return tables;
+});
+const tableFilterOptions = [
+  { value: "all", label: "全部" },
+  { value: "enabled", label: "已授权" },
+  { value: "disabled", label: "未授权" },
+] as const;
 
 function setError(error: unknown, fallback: string) {
   errorMessage.value = error instanceof ApiRequestError ? error.message : fallback;
@@ -82,6 +97,8 @@ async function loadDatabases(preferredId = selectedDatabaseId.value) {
 function selectDatabase(databaseId: string) {
   selectedDatabaseId.value = databaseId;
   errorMessage.value = "";
+  batchMessage.value = "";
+  tableFilter.value = "all";
 }
 
 function resetForm() {
@@ -213,7 +230,7 @@ async function activateDatabase(database: Database) {
 
 async function toggleTable(database: Database, tableName: string, value: boolean) {
   const table = database.tables.find((item) => item.table_name === tableName);
-  if (!table || !isAdmin.value) return;
+  if (!table || !isAdmin.value || !database.enabled || batchUpdating.value) return;
 
   const previous = table.agent_access;
   table.agent_access = value;
@@ -224,6 +241,42 @@ async function toggleTable(database: Database, tableName: string, value: boolean
     table.agent_access = previous;
     setError(error, "表权限更新失败。");
   }
+}
+
+async function updateAllTableAccess(value: boolean) {
+  const database = selectedDatabase.value;
+  if (!database || !isAdmin.value || !database.enabled || batchUpdating.value) return;
+
+  const pendingTables = database.tables.filter((table) => table.agent_access !== value);
+  if (!pendingTables.length) {
+    batchMessage.value = value ? "所有数据表已授权。" : "所有数据表已取消授权。";
+    return;
+  }
+
+  batchUpdating.value = true;
+  batchMessage.value = "正在逐项更新权限…";
+  errorMessage.value = "";
+  let succeeded = 0;
+  let failed = 0;
+
+  for (const table of pendingTables) {
+    const previous = table.agent_access;
+    table.agent_access = value;
+    try {
+      const saved = await updateDatabaseTableAccess(database.id, table.table_name, value);
+      table.agent_access = saved.agent_access;
+      succeeded += 1;
+    } catch {
+      table.agent_access = previous;
+      failed += 1;
+    }
+  }
+
+  batchUpdating.value = false;
+  batchMessage.value = failed
+    ? `已更新 ${succeeded} 张表，${failed} 张表失败。`
+    : `已更新 ${succeeded} 张表。`;
+  if (failed) errorMessage.value = `部分表权限更新失败：${failed} 张表未改变。`;
 }
 
 async function removeDatabase(database: Database) {
@@ -245,69 +298,20 @@ onMounted(() => void loadDatabases());
   <main class="databases-page">
     <p v-if="errorMessage && !modalOpen" class="alert" role="alert">{{ errorMessage }}</p>
 
-    <section class="database-workspace" aria-labelledby="database-list-title">
-      <aside class="database-sidebar" aria-label="数据库列表">
-        <div class="database-sidebar__header">
-          <div>
-            <h2 id="database-list-title">数据库</h2>
-            <p>{{ databases.length }} 个数据源</p>
-          </div>
-        </div>
-
-        <div v-if="loading" class="sidebar-state">
-          <LoaderCircle class="spin" :size="19" />
-          正在加载
-        </div>
-        <div v-else-if="databases.length === 0" class="sidebar-state">
-          <DatabaseIcon :size="19" />
-          暂无数据库
-        </div>
-        <nav v-else class="database-nav" aria-label="选择数据库">
-          <button
-            v-for="database in databases"
-            :key="database.id"
-            class="database-nav-item"
-            :class="{
-              'database-nav-item--active': database.id === selectedDatabase?.id,
-              'database-nav-item--inactive': !database.enabled,
-            }"
-            type="button"
-            @click="selectDatabase(database.id)"
-          >
-            <span class="database-nav-item__icon"><DatabaseIcon :size="17" /></span>
-            <span class="database-nav-item__copy">
-              <strong>{{ database.name }}</strong>
-              <small>{{ database.dialect.toUpperCase() }}</small>
-            </span>
-            <span
-              class="database-nav-item__status"
-              :class="{ 'database-nav-item__status--ready': database.enabled }"
-            >
-              <Check v-if="database.enabled" :size="12" />
-              {{ database.enabled ? "已启用" : "停用" }}
-            </span>
-          </button>
-        </nav>
-
-        <div class="sidebar-footer">
-          <button
-            class="sidebar-refresh-button"
-            type="button"
-            title="刷新列表"
-            aria-label="刷新列表"
-            :disabled="loading"
-            @click="loadDatabases()"
-          >
-            <RefreshCw :class="{ spin: loading }" :size="16" />
-            刷新
-          </button>
-          <button v-if="isAdmin" class="sidebar-add-button" type="button" @click="openCreate">
-            <Plus :size="16" /> 添加数据库
-          </button>
-        </div>
-      </aside>
-
-      <section v-if="selectedDatabase" class="database-detail" aria-labelledby="database-detail-title">
+    <DatabaseLayout
+      :databases="databases"
+      :selected-database-id="selectedDatabase?.id ?? ''"
+      :loading="loading"
+      :is-admin="isAdmin"
+      @select="selectDatabase"
+      @refresh="loadDatabases()"
+      @add="openCreate"
+    >
+      <section
+        v-if="selectedDatabase"
+        class="database-detail"
+        aria-labelledby="database-detail-title"
+      >
         <header class="detail-header">
           <div class="database-identity">
             <span class="database-icon"><DatabaseIcon :size="20" /></span>
@@ -320,9 +324,7 @@ onMounted(() => void loadDatabases());
           <button
             class="status-badge"
             :class="[
-              selectedDatabase.enabled
-                ? 'status-badge--ready'
-                : 'status-badge--interactive',
+              selectedDatabase.enabled ? 'status-badge--ready' : 'status-badge--interactive',
             ]"
             type="button"
             :disabled="!isAdmin || selectedDatabase.enabled || activatingId !== ''"
@@ -333,11 +335,7 @@ onMounted(() => void loadDatabases());
             "
             @click="activateDatabase(selectedDatabase)"
           >
-            <LoaderCircle
-              v-if="activatingId === selectedDatabase.id"
-              class="spin"
-              :size="13"
-            />
+            <LoaderCircle v-if="activatingId === selectedDatabase.id" class="spin" :size="13" />
             <Check v-else-if="selectedDatabase.enabled" :size="13" />
             {{
               activatingId === selectedDatabase.id
@@ -370,32 +368,79 @@ onMounted(() => void loadDatabases());
               <h3>Agent 表权限</h3>
               <p>只有开启的表会进入 Agent 的 Schema 和查询权限。</p>
             </div>
-            <span>{{ enabledTableCount }} / {{ selectedDatabase.tables.length }} 已授权</span>
+            <span class="table-heading__count">{{ enabledTableCount }} / {{ selectedDatabase.tables.length }} 已授权</span>
           </div>
 
-          <div v-if="selectedDatabase.tables.length" class="table-list">
+          <div class="table-controls">
+            <div class="table-filter" role="group" aria-label="表权限筛选">
+              <button
+                v-for="option in tableFilterOptions"
+                :key="option.value"
+                type="button"
+                :class="{ active: tableFilter === option.value }"
+                :disabled="batchUpdating"
+                @click="tableFilter = option.value"
+              >
+                {{ option.label }}
+              </button>
+            </div>
+            <div class="table-batch-actions">
+              <button
+                class="text-action"
+                type="button"
+                :disabled="!isAdmin || !selectedDatabase.enabled || batchUpdating"
+                @click="updateAllTableAccess(true)"
+              >
+                全部授权
+              </button>
+              <button
+                class="text-action text-action--muted"
+                type="button"
+                :disabled="!isAdmin || !selectedDatabase.enabled || batchUpdating"
+                @click="updateAllTableAccess(false)"
+              >
+                全部取消
+              </button>
+            </div>
+          </div>
+
+          <p v-if="batchMessage" class="batch-message" role="status" aria-live="polite">
+            <LoaderCircle v-if="batchUpdating" class="spin" :size="13" />
+            <Check v-else :size="13" />
+            {{ batchMessage }}
+          </p>
+
+          <div v-if="selectedDatabase.tables.length && filteredTables.length" class="table-list">
             <label
-              v-for="table in selectedDatabase.tables"
+              v-for="table in filteredTables"
               :key="table.table_name"
               class="table-row"
+              :class="{ 'table-row--enabled': table.agent_access }"
             >
-              <span>
+              <span class="table-row__copy">
                 <span class="table-name">{{ table.table_name }}</span>
                 <small>{{ table.agent_access ? "允许查询" : "已禁止" }}</small>
               </span>
-              <input
-                type="checkbox"
-                :checked="table.agent_access"
-                :disabled="!isAdmin || !selectedDatabase.enabled"
-                @change="
-                  toggleTable(
-                    selectedDatabase,
-                    table.table_name,
-                    ($event.target as HTMLInputElement).checked,
-                  )
-                "
-              />
+              <span class="table-row__control">
+                <span class="table-row__state">{{ table.agent_access ? "已授权" : "未授权" }}</span>
+                <input
+                  type="checkbox"
+                  :checked="table.agent_access"
+                  :disabled="!isAdmin || !selectedDatabase.enabled || batchUpdating"
+                  :aria-label="`${table.table_name} ${table.agent_access ? '已授权' : '未授权'}`"
+                  @change="
+                    toggleTable(
+                      selectedDatabase,
+                      table.table_name,
+                      ($event.target as HTMLInputElement).checked,
+                    )
+                  "
+                />
+              </span>
             </label>
+          </div>
+          <div v-else-if="selectedDatabase.tables.length" class="table-empty">
+            当前筛选没有匹配的数据表
           </div>
           <div v-else class="table-empty">请先测试连接以读取数据表</div>
         </div>
@@ -404,14 +449,10 @@ onMounted(() => void loadDatabases());
           <button
             class="secondary-button"
             type="button"
-            :disabled="!isAdmin || testingId === selectedDatabase.id"
+            :disabled="!isAdmin || testingId === selectedDatabase.id || batchUpdating"
             @click="handleTest(selectedDatabase)"
           >
-            <LoaderCircle
-              v-if="testingId === selectedDatabase.id"
-              class="spin"
-              :size="15"
-            />
+            <LoaderCircle v-if="testingId === selectedDatabase.id" class="spin" :size="15" />
             <RefreshCw v-else :size="15" />
             {{ testingId === selectedDatabase.id ? "测试中" : "测试连接" }}
           </button>
@@ -443,15 +484,10 @@ onMounted(() => void loadDatabases());
         <DatabaseIcon :size="28" />
         <p>选择一个数据库开始管理</p>
       </section>
-    </section>
+    </DatabaseLayout>
 
     <div v-if="modalOpen" class="modal-backdrop" role="presentation" @click.self="closeModal">
-      <section
-        class="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="database-modal-title"
-      >
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="database-modal-title">
         <header class="modal-header">
           <div>
             <p class="eyebrow">{{ editingDatabase ? "EDIT SOURCE" : "NEW SOURCE" }}</p>
@@ -496,7 +532,12 @@ onMounted(() => void loadDatabases());
           </fieldset>
           <label v-if="form.dialect === 'sqlite'">
             文件路径
-            <input v-model="form.path" type="text" placeholder="data/demo.sqlite" :disabled="saving" />
+            <input
+              v-model="form.path"
+              type="text"
+              placeholder="data/demo.sqlite"
+              :disabled="saving"
+            />
           </label>
           <template v-else>
             <label>
@@ -519,7 +560,12 @@ onMounted(() => void loadDatabases());
             </label>
             <label>
               凭据引用
-              <input v-model="form.credentialRef" type="text" placeholder="secret/my-db-readonly" :disabled="saving" />
+              <input
+                v-model="form.credentialRef"
+                type="text"
+                placeholder="secret/my-db-readonly"
+                :disabled="saving"
+              />
             </label>
             <label class="checkbox-line">
               <input v-model="form.tls" type="checkbox" :disabled="saving" />启用 TLS
@@ -527,7 +573,9 @@ onMounted(() => void loadDatabases());
           </template>
           <p v-if="errorMessage && modalOpen" class="form-error" role="alert">{{ errorMessage }}</p>
           <footer class="modal-actions">
-            <button class="secondary-button" type="button" :disabled="saving" @click="closeModal">取消</button>
+            <button class="secondary-button" type="button" :disabled="saving" @click="closeModal">
+              取消
+            </button>
             <button class="primary-button" type="submit" :disabled="saving">
               <LoaderCircle v-if="saving" class="spin" :size="16" />
               {{ saving ? "保存中" : "保存数据库" }}
@@ -548,7 +596,6 @@ onMounted(() => void loadDatabases());
 }
 
 .detail-header,
-.database-sidebar__header,
 .table-heading,
 .detail-actions,
 .modal-header,
@@ -585,16 +632,14 @@ h3 {
   font-size: 14px;
 }
 
-.table-heading p,
-.database-sidebar__header p {
+.table-heading p {
   margin-bottom: 0;
   color: #6f7772;
   font-size: 13px;
 }
 
 .primary-button,
-.secondary-button,
-.sidebar-add-button {
+.secondary-button {
   display: inline-flex;
   min-height: 40px;
   align-items: center;
@@ -618,8 +663,7 @@ h3 {
 }
 
 .primary-button:disabled,
-.secondary-button:disabled,
-.sidebar-add-button:disabled {
+.secondary-button:disabled {
   cursor: default;
   opacity: 0.55;
 }
@@ -648,184 +692,6 @@ h3 {
 
 .form-error {
   margin: 0;
-}
-
-.database-workspace {
-  display: grid;
-  width: 100%;
-  min-width: 0;
-  min-height: 636px;
-  grid-template-columns: minmax(250px, 280px) minmax(0, 1fr);
-  overflow: hidden;
-  border: 1px solid #e7e7e7;
-  border-radius: 12px;
-  background: #ffffff;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.045);
-}
-
-.database-sidebar {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  padding: 20px 13px 13px;
-  background: #f7f7f8;
-}
-
-.database-sidebar__header {
-  padding: 4px 8px 18px;
-}
-
-.database-sidebar__header h2 {
-  font-size: 16px;
-}
-
-.database-sidebar__header p {
-  margin-top: 4px;
-  color: #8a8f8b;
-  font-size: 11px;
-}
-
-.database-nav {
-  display: grid;
-  flex: 1;
-  gap: 3px;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.database-nav-item {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 10px;
-  border: 0;
-  border-radius: 8px;
-  padding: 12px 9px;
-  color: #444746;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-
-.database-nav-item:hover {
-  background: #ececee;
-}
-
-.database-nav-item--active {
-  color: #202123;
-  background: #e4e4e4;
-}
-
-.database-nav-item--inactive {
-  color: #747875;
-}
-
-.database-nav-item__icon {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  flex: 0 0 auto;
-  place-items: center;
-  border-radius: 6px;
-  color: #397453;
-  background: #e6f2e9;
-}
-
-.database-nav-item--inactive .database-nav-item__icon {
-  color: #7f8781;
-  background: #e8e9e8;
-}
-
-.database-nav-item__copy {
-  display: grid;
-  min-width: 0;
-  flex: 1;
-  gap: 3px;
-}
-
-.database-nav-item__copy strong {
-  overflow: hidden;
-  font-size: 13px;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.database-nav-item__copy small {
-  color: #8b918d;
-  font-size: 10px;
-}
-
-.database-nav-item__status {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  color: #969b97;
-  font-size: 10px;
-  white-space: nowrap;
-}
-
-.database-nav-item__status--ready {
-  color: #397453;
-}
-
-.sidebar-footer {
-  display: grid;
-  gap: 8px;
-  margin-top: 16px;
-}
-
-.sidebar-refresh-button,
-.sidebar-add-button {
-  display: inline-flex;
-  width: 100%;
-  min-height: 40px;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border-radius: 8px;
-  padding: 0 12px;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.sidebar-refresh-button {
-  border: 0;
-  color: #656c67;
-  background: transparent;
-}
-
-.sidebar-refresh-button:hover:not(:disabled) {
-  color: #326d4c;
-  background: #ececee;
-}
-
-.sidebar-refresh-button:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-
-.sidebar-add-button {
-  border: 1px solid #dfe1df;
-  color: #4f5953;
-  background: #ffffff;
-}
-
-.sidebar-add-button:hover {
-  border-color: #c5d7c9;
-  color: #326d4c;
-  background: #fbfffc;
-}
-
-.sidebar-state {
-  display: flex;
-  min-height: 170px;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  color: #7d847f;
-  font-size: 12px;
 }
 
 .database-detail {
@@ -975,7 +841,11 @@ h3 {
 .table-name {
   overflow: hidden;
   color: #303634;
-  font: 12px ui-monospace, SFMono-Regular, Consolas, monospace;
+  font:
+    12px ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1174,38 +1044,329 @@ fieldset {
   margin-top: 4px;
 }
 
+/* Database workspace visual system. */
+.databases-page {
+  min-height: 100vh;
+  padding: 24px;
+  color: #24332a;
+  background: #edf1ec;
+}
+
+.databases-page > .alert {
+  width: min(100%, 1180px);
+  margin: 0 auto 14px;
+  border-color: #e9c7bd;
+  color: #8d4036;
+  background: #fff9f6;
+}
+
+.database-detail {
+  min-height: 100%;
+  background: #fbfcfa;
+}
+
+.detail-header {
+  min-height: 132px;
+  padding: 28px 32px 25px;
+  border-bottom: 1px solid #e0e7e1;
+  background: #fffefa;
+}
+
+.database-identity {
+  gap: 15px;
+}
+
+.database-icon {
+  width: 48px;
+  height: 48px;
+  border: 1px solid #cde1d2;
+  border-radius: 9px;
+  color: #31744d;
+  background: #eaf5ec;
+}
+
+.eyebrow {
+  margin-bottom: 6px;
+  color: #5c8d6d;
+  font-size: 10px;
+  letter-spacing: 0.13em;
+}
+
+.detail-header h2 {
+  color: #1f2e25;
+  font-size: 23px;
+  font-weight: 730;
+  letter-spacing: 0;
+}
+
+.database-meta {
+  display: inline-block;
+  margin-top: 5px;
+  color: #77857b;
+  font:
+    11px ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+}
+
+.status-badge {
+  min-height: 34px;
+  gap: 6px;
+  border: 1px solid #ebd5a8;
+  border-radius: 7px;
+  padding: 0 11px;
+  color: #8b672e;
+  background: #fff8e8;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.status-badge--ready {
+  border-color: #c4e1cb;
+  color: #267044;
+  background: #eff9f0;
+}
+
+.status-badge--interactive:hover:not(:disabled) {
+  border-color: #dfbb6d;
+  background: #fff1d2;
+}
+
+.detail-summary {
+  gap: 10px;
+  margin: 24px 32px 0;
+  border: 0;
+  background: transparent;
+}
+
+.summary-item {
+  position: relative;
+  gap: 6px;
+  border: 1px solid #dfe7e0;
+  border-radius: 8px;
+  padding: 16px 18px;
+  background: #fffefa;
+  box-shadow: 0 2px 5px rgba(30, 49, 36, 0.025);
+}
+
+.summary-item:first-child {
+  border-top: 2px solid #81bc90;
+}
+
+.summary-item:nth-child(2) {
+  border-top: 2px solid #79a8bd;
+}
+
+.summary-item:last-child {
+  border-top: 2px solid #ccb376;
+}
+
+.summary-item strong {
+  color: #26372c;
+  font-size: 21px;
+  font-weight: 730;
+}
+
+.summary-item span {
+  color: #718075;
+  font-size: 11px;
+}
+
+.detail-section {
+  margin: 30px 32px 0;
+}
+
+.table-heading {
+  align-items: flex-end;
+  margin-bottom: 14px;
+}
+
+.table-heading h3 {
+  margin-bottom: 6px;
+  color: #26372c;
+  font-size: 15px;
+  font-weight: 720;
+}
+
+.table-heading p {
+  color: #77857b;
+  font-size: 12px;
+}
+
+.table-heading > span {
+  border: 1px solid #d7e6d9;
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: #477655;
+  background: #f1f8f1;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.table-list {
+  gap: 9px 10px;
+}
+
+.table-row {
+  min-height: 58px;
+  border-color: #dfe7e0;
+  border-radius: 7px;
+  padding: 9px 13px;
+  background: #fffefa;
+}
+
+.table-row:hover {
+  border-color: #a6cdae;
+  background: #f7fcf7;
+}
+
+.table-row:has(input:checked) {
+  border-color: #c2ddc7;
+  background: #f6fbf6;
+}
+
+.table-name {
+  color: #304037;
+  font-size: 12px;
+}
+
+.table-row small {
+  color: #728075;
+}
+
+.table-row input,
+.checkbox-line input {
+  accent-color: #367a4e;
+}
+
+.table-empty {
+  border: 1px dashed #ccd8ce;
+  border-radius: 7px;
+  padding: 28px 18px;
+  color: #77857b;
+  background: #fffefa;
+  text-align: center;
+}
+
+.detail-actions {
+  min-height: 76px;
+  margin-top: 30px;
+  border-top-color: #e0e7e1;
+  padding: 15px 32px;
+  background: #fffefa;
+}
+
+.secondary-button {
+  min-height: 38px;
+  border-color: #cfdcd1;
+  border-radius: 7px;
+  color: #365b42;
+  background: #f8fbf8;
+  font-weight: 700;
+}
+
+.secondary-button:hover:not(:disabled) {
+  border-color: #88b797;
+  color: #1d6138;
+  background: #eff8f0;
+}
+
+.primary-button {
+  min-height: 40px;
+  border-radius: 7px;
+  color: #123421;
+  background: #bde7c5;
+}
+
+.primary-button:hover:not(:disabled) {
+  background: #abdbb6;
+}
+
+.icon-button {
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #617167;
+}
+
+.icon-button:hover:not(:disabled) {
+  border-color: #c8d9cc;
+  color: #28633e;
+  background: #f0f8f1;
+}
+
+.icon-button--danger:hover {
+  border-color: #ebcdcd;
+  color: #a94747;
+  background: #fff5f5;
+}
+
+.database-detail--empty {
+  min-height: 680px;
+  border: 0;
+  color: #77857b;
+  background: #fbfcfa;
+}
+
+.database-detail--empty svg {
+  color: #619274;
+}
+
+.modal-backdrop {
+  background: rgba(15, 33, 23, 0.52);
+}
+
+.modal {
+  width: min(100%, 500px);
+  border-color: #d4e0d6;
+  border-radius: 9px;
+  padding: 26px;
+  background: #fffefa;
+  box-shadow: 0 28px 80px rgba(8, 24, 15, 0.34);
+}
+
+.modal-header {
+  padding-bottom: 18px;
+  border-bottom: 1px solid #e2e9e3;
+}
+
+.modal-header h2 {
+  color: #233329;
+}
+
+.database-form label,
+fieldset,
+.database-form legend {
+  color: #405447;
+}
+
+.database-form input[type="text"],
+.database-form input[type="number"] {
+  border-color: #d2dfd4;
+  border-radius: 6px;
+  color: #25372b;
+  background: #fbfdfb;
+}
+
+.database-form input:focus {
+  border-color: #6fad80;
+  box-shadow: 0 0 0 3px rgba(92, 163, 112, 0.13);
+}
+
+.dialect-switch {
+  border-color: #d2dfd4;
+  border-radius: 7px;
+  background: #edf3ee;
+}
+
+.dialect-switch button.active {
+  color: #205e39;
+  background: #fffefa;
+}
+
 @media (max-width: 1100px) {
   .databases-page {
     padding: 22px 16px 32px;
-  }
-
-  .database-workspace {
-    display: block;
-    min-height: 0;
-  }
-
-  .database-sidebar {
-    padding: 14px 12px 12px;
-  }
-
-  .database-sidebar__header {
-    padding-bottom: 10px;
-  }
-
-  .database-nav {
-    display: flex;
-    overflow-x: auto;
-    gap: 5px;
-    padding-bottom: 3px;
-  }
-
-  .database-nav-item {
-    width: 190px;
-    flex: 0 0 190px;
-  }
-
-  .sidebar-add-button {
-    margin-top: 0;
   }
 
   .detail-header,
@@ -1228,9 +1389,36 @@ fieldset {
   .table-list {
     grid-template-columns: 1fr;
   }
+
+  .detail-header,
+  .detail-actions {
+    padding-inline: 22px;
+  }
+
+  .detail-summary,
+  .detail-section {
+    margin-inline: 22px;
+  }
 }
 
 @media (max-width: 520px) {
+  .databases-page {
+    padding: 10px;
+  }
+
+  .detail-header {
+    padding: 22px 18px;
+  }
+
+  .detail-actions {
+    padding-inline: 18px;
+  }
+
+  .detail-summary,
+  .detail-section {
+    margin-inline: 18px;
+  }
+
   .detail-summary {
     display: grid;
     grid-template-columns: 1fr 1fr;

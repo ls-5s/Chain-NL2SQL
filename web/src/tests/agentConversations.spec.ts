@@ -241,6 +241,23 @@ describe("agent conversations", () => {
     expect(store.activeConversationId.value).toBe("c3");
   });
 
+  it("refreshes a cached session before showing it after a switch", async () => {
+    const latestMessages = [
+      { id: "m1", turn_id: "t1", role: "user", content: "最新问题", status: "succeeded", progress: [], created_at: "2026-01-01T00:00:00Z" },
+      { id: "m2", turn_id: "t1", role: "assistant", content: "最新回答", status: "succeeded", progress: [], created_at: "2026-01-01T00:00:01Z" },
+    ];
+    api.fetchConversations.mockResolvedValue([summary, summary2]);
+    api.fetchConversation.mockImplementation(async (conversationId: string) =>
+      conversationId === "c2" ? detail(latestMessages, summary2) : detail([], summary),
+    );
+    const store = createAgentConversationStore();
+    await store.initialize();
+
+    await store.selectConversation("c2");
+    expect(api.fetchConversation).toHaveBeenCalledWith("c2");
+    expect(store.activeConversation.value.messages).toEqual(latestMessages);
+  });
+
   it("does not delete a session while its query is running", async () => {
     const completed = deferred<object>();
     api.streamConversationQuery.mockImplementation(async () => completed.promise);

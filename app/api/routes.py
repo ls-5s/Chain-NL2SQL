@@ -631,7 +631,10 @@ async def _stream_graph(
         async for update in graph.astream(state, stream_mode="updates"):
             for node, node_update in update.items():
                 current_node = node
-                current_state.update(node_update)
+                # LangGraph may emit a null update for a no-op node after an
+                # earlier terminal failure. Treat it as an empty patch so a
+                # structured failed response can still reach SSE clients.
+                current_state.update(node_update or {})
                 progress: dict[str, Any] = {
                     "request_id": state["request_id"],
                     "phase": "progress",

@@ -251,163 +251,158 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="rag-page">
-    <header class="page-header">
-      <div>
-        <p class="eyebrow">KNOWLEDGE BASE</p>
-        <h1>RAG 资料库</h1>
-        <p class="page-description">
-          管理业务规则、指标口径和操作文档，为 Agent 提供可追溯的业务背景。
-        </p>
-      </div>
-      <button v-if="isAdmin" class="primary-button" type="button" @click="openUpload">
-        <UploadCloud :size="17" />上传资料
-      </button>
-    </header>
-    <section class="summary-row" aria-label="资料库概览">
-      <div class="summary-item">
-        <strong>{{ documents.length }}</strong
-        ><span>资料总数</span>
-      </div>
-      <div class="summary-item">
-        <strong>{{ indexedCount }}</strong
-        ><span>已完成索引</span>
-      </div>
-      <div class="summary-item">
-        <strong>{{ processingCount }}</strong
-        ><span>处理中</span>
-      </div>
-      <div class="summary-item">
-        <strong>{{ failedCount }}</strong
-        ><span>需要处理</span>
-      </div>
-    </section>
-    <p v-if="errorMessage && !uploadOpen && !deleteTarget" class="alert" role="alert">
-      {{ errorMessage }}
-    </p>
-    <section class="knowledge-surface" aria-labelledby="knowledge-title">
-      <div class="surface-heading">
-        <div>
-          <h2 id="knowledge-title">资料列表</h2>
-          <p>已索引内容会自动参与 Agent 的业务背景检索。</p>
-        </div>
-        <button
-          class="icon-button"
-          type="button"
-          title="刷新列表"
-          aria-label="刷新列表"
-          :disabled="loading || refreshing"
-          @click="loadDocuments(true)"
-        >
-          <RefreshCw :class="{ spin: loading || refreshing }" :size="17" />
-        </button>
-      </div>
-      <div class="filters">
-        <label class="search-field"
-          ><Search :size="16" /><input
-            v-model="query"
-            type="search"
-            placeholder="搜索文件名、分类或摘要"
-            aria-label="搜索资料" /></label
-        ><select v-model="categoryFilter" aria-label="按分类筛选">
-          <option value="all">全部分类</option>
-          <option v-for="item in categories" :key="item" :value="item">{{ item }}</option>
-        </select>
-      </div>
-      <div v-if="loading" class="empty-state">
-        <LoaderCircle class="spin" :size="22" />正在加载资料库
-      </div>
-      <div v-else-if="!filteredDocuments.length" class="empty-state">
-        <FileText :size="22" />{{
-          documents.length ? "没有匹配的资料" : "暂无资料，先上传一份业务文档"
-        }}
-      </div>
-      <div v-else class="document-list">
-        <article v-for="document in filteredDocuments" :key="document.id" class="document-row">
-          <span class="document-icon"><FileText :size="19" /></span>
-          <div class="document-main">
-            <div class="document-title">
-              <h3>{{ document.filename }}</h3>
-              <span class="file-type">{{ document.file_type }}</span>
-            </div>
-            <p>{{ document.summary || "等待解析摘要" }}</p>
-            <small
-              >{{ document.category }} · {{ formatSize(document.size_bytes) }} ·
-              {{ formatDate(document.created_at)
-              }}<template v-if="document.chunk_count">
-                · {{ document.chunk_count }} 个片段</template
-              ></small
+    <section class="rag-workspace" aria-label="RAG 资料库">
+      <aside class="rag-sidebar" aria-label="资料库导航">
+        <header class="rag-sidebar__header">
+          <p class="eyebrow">KNOWLEDGE BASE</p>
+          <h1>RAG 资料库</h1>
+          <p>{{ documents.length }} 份资料</p>
+        </header>
+        <div class="rag-sidebar__body">
+          <section class="rag-sidebar__stats" aria-label="资料库概览">
+            <div><strong>{{ documents.length }}</strong><span>资料总数</span></div>
+            <div><strong>{{ indexedCount }}</strong><span>已完成索引</span></div>
+            <div><strong>{{ processingCount }}</strong><span>处理中</span></div>
+            <div><strong>{{ failedCount }}</strong><span>需要处理</span></div>
+          </section>
+          <div class="filters">
+            <label class="search-field"
+              ><Search :size="16" /><input
+                v-model="query"
+                type="search"
+                placeholder="搜索文件名、分类或摘要"
+                aria-label="搜索资料" /></label
+            ><select v-model="categoryFilter" aria-label="按分类筛选">
+              <option value="all">全部分类</option>
+              <option v-for="item in categories" :key="item" :value="item">{{ item }}</option>
+            </select>
+          </div>
+          <footer class="rag-sidebar__footer">
+            <button v-if="isAdmin" class="primary-button" type="button" @click="openUpload">
+              <UploadCloud :size="17" />上传资料
+            </button>
+            <button
+              class="sidebar-refresh-button"
+              type="button"
+              title="刷新列表"
+              aria-label="刷新列表"
+              :disabled="loading || refreshing"
+              @click="loadDocuments(true)"
             >
-            <div v-if="document.failure_message" class="failure-message">
-              <TriangleAlert :size="14" />{{ document.failure_message }}
-            </div>
-            <div v-if="isAdmin" class="document-acl">
-              <ShieldCheck :size="15" aria-hidden="true" />
-              <label :for="`acl-policy-${document.id}`">访问范围</label>
-              <select
-                :id="`acl-policy-${document.id}`"
-                :value="aclDraft(document).policyType"
-                :disabled="aclSavingId === document.id"
-                @change="updateAclDraft(document, 'policyType', ($event.target as HTMLSelectElement).value)"
-              >
-                <option value="deny">禁止访问</option>
-                <option value="all_authenticated">所有已登录用户</option>
-                <option value="role">指定角色</option>
-                <option value="user">指定用户</option>
-              </select>
-              <input
-                v-if="aclDraft(document).policyType === 'role'"
-                :value="aclDraft(document).role"
-                :disabled="aclSavingId === document.id"
-                maxlength="64"
-                placeholder="角色"
-                aria-label="允许访问的角色"
-                @input="updateAclDraft(document, 'role', ($event.target as HTMLInputElement).value)"
-              />
-              <input
-                v-if="aclDraft(document).policyType === 'user'"
-                :value="aclDraft(document).userId"
-                :disabled="aclSavingId === document.id"
-                maxlength="128"
-                placeholder="用户 ID"
-                aria-label="允许访问的用户 ID"
-                @input="updateAclDraft(document, 'userId', ($event.target as HTMLInputElement).value)"
-              />
-              <button
-                class="icon-button document-acl__save"
-                type="button"
-                title="保存访问范围"
-                aria-label="保存访问范围"
-                :disabled="aclSavingId === document.id"
-                @click="saveAcl(document)"
-              >
-                <LoaderCircle v-if="aclSavingId === document.id" class="spin" :size="16" />
-                <CheckCircle2 v-else :size="16" />
-              </button>
-              <span v-if="aclErrors[document.id]" class="document-acl__error" role="alert">{{ aclErrors[document.id] }}</span>
+              <RefreshCw :class="{ spin: loading || refreshing }" :size="17" />刷新
+            </button>
+          </footer>
+        </div>
+      </aside>
+
+      <section class="rag-content">
+        <p v-if="errorMessage && !uploadOpen && !deleteTarget" class="alert" role="alert">
+          {{ errorMessage }}
+        </p>
+        <section class="knowledge-surface" aria-labelledby="knowledge-title">
+          <div class="surface-heading">
+            <div>
+              <h2 id="knowledge-title">资料列表</h2>
+              <p>已索引内容会自动参与 Agent 的业务背景检索。</p>
             </div>
           </div>
-          <span :class="['status-badge', `status-badge--${document.status}`]"
-            ><LoaderCircle
-              v-if="document.status === 'uploading' || document.status === 'parsing'"
-              class="spin"
-              :size="13"
-            /><CheckCircle2 v-else-if="document.status === 'indexed'" :size="13" /><TriangleAlert
-              v-else
-              :size="13"
-            />{{ statusLabel(document.status) }}</span
-          ><button
-            v-if="isAdmin"
-            class="icon-button icon-button--danger"
-            type="button"
-            title="删除资料"
-            aria-label="删除资料"
-            :disabled="document.status === 'uploading' || document.status === 'parsing'"
-            @click="openDelete(document)"
-          >
-            <Trash2 :size="16" />
-          </button>
-        </article>
-      </div>
+          <div v-if="loading" class="empty-state">
+            <LoaderCircle class="spin" :size="22" />正在加载资料库
+          </div>
+          <div v-else-if="!filteredDocuments.length" class="empty-state">
+            <FileText :size="22" />{{
+              documents.length ? "没有匹配的资料" : "暂无资料，先上传一份业务文档"
+            }}
+          </div>
+          <div v-else class="document-list">
+            <article v-for="document in filteredDocuments" :key="document.id" class="document-row">
+              <span class="document-icon"><FileText :size="19" /></span>
+              <div class="document-main">
+                <div class="document-title">
+                  <h3>{{ document.filename }}</h3>
+                  <span class="file-type">{{ document.file_type }}</span>
+                </div>
+                <p>{{ document.summary || "等待解析摘要" }}</p>
+                <small
+                  >{{ document.category }} · {{ formatSize(document.size_bytes) }} ·
+                  {{ formatDate(document.created_at)
+                  }}<template v-if="document.chunk_count">
+                    · {{ document.chunk_count }} 个片段</template
+                  ></small
+                >
+                <div v-if="document.failure_message" class="failure-message">
+                  <TriangleAlert :size="14" />{{ document.failure_message }}
+                </div>
+                <div v-if="isAdmin" class="document-acl">
+                  <ShieldCheck :size="15" aria-hidden="true" />
+                  <label :for="`acl-policy-${document.id}`">访问范围</label>
+                  <select
+                    :id="`acl-policy-${document.id}`"
+                    :value="aclDraft(document).policyType"
+                    :disabled="aclSavingId === document.id"
+                    @change="updateAclDraft(document, 'policyType', ($event.target as HTMLSelectElement).value)"
+                  >
+                    <option value="deny">禁止访问</option>
+                    <option value="all_authenticated">所有已登录用户</option>
+                    <option value="role">指定角色</option>
+                    <option value="user">指定用户</option>
+                  </select>
+                  <input
+                    v-if="aclDraft(document).policyType === 'role'"
+                    :value="aclDraft(document).role"
+                    :disabled="aclSavingId === document.id"
+                    maxlength="64"
+                    placeholder="角色"
+                    aria-label="允许访问的角色"
+                    @input="updateAclDraft(document, 'role', ($event.target as HTMLInputElement).value)"
+                  />
+                  <input
+                    v-if="aclDraft(document).policyType === 'user'"
+                    :value="aclDraft(document).userId"
+                    :disabled="aclSavingId === document.id"
+                    maxlength="128"
+                    placeholder="用户 ID"
+                    aria-label="允许访问的用户 ID"
+                    @input="updateAclDraft(document, 'userId', ($event.target as HTMLInputElement).value)"
+                  />
+                  <button
+                    class="icon-button document-acl__save"
+                    type="button"
+                    title="保存访问范围"
+                    aria-label="保存访问范围"
+                    :disabled="aclSavingId === document.id"
+                    @click="saveAcl(document)"
+                  >
+                    <LoaderCircle v-if="aclSavingId === document.id" class="spin" :size="16" />
+                    <CheckCircle2 v-else :size="16" />
+                  </button>
+                  <span v-if="aclErrors[document.id]" class="document-acl__error" role="alert">{{ aclErrors[document.id] }}</span>
+                </div>
+              </div>
+              <span :class="['status-badge', `status-badge--${document.status}`]"
+                ><LoaderCircle
+                  v-if="document.status === 'uploading' || document.status === 'parsing'"
+                  class="spin"
+                  :size="13"
+                /><CheckCircle2 v-else-if="document.status === 'indexed'" :size="13" /><TriangleAlert
+                  v-else
+                  :size="13"
+                />{{ statusLabel(document.status) }}</span
+              ><button
+                v-if="isAdmin"
+                class="icon-button icon-button--danger"
+                type="button"
+                title="删除资料"
+                aria-label="删除资料"
+                :disabled="document.status === 'uploading' || document.status === 'parsing'"
+                @click="openDelete(document)"
+              >
+                <Trash2 :size="16" />
+              </button>
+            </article>
+          </div>
+        </section>
+      </section>
     </section>
     <div v-if="uploadOpen" class="modal-backdrop" role="presentation" @click.self="closeUpload">
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="upload-title">
@@ -486,10 +481,126 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .rag-page {
-  min-height: 100dvh;
-  padding: 30px clamp(20px, 5vw, 72px) 56px;
+  min-height: 100vh;
+  padding: 40px 32px 48px;
   color: #203027;
-  background: #f7f9f7;
+  background: #ffffff;
+}
+.rag-workspace {
+  display: flex;
+  width: 100%;
+  height: calc(100vh - 64px);
+  min-width: 0;
+  min-height: 680px;
+  overflow: hidden;
+  border: 1px solid #d9e0da;
+  border-radius: 10px;
+  background: #f9fbf9;
+  box-shadow: 0 20px 50px rgba(22, 40, 29, 0.08);
+}
+.rag-sidebar {
+  display: flex;
+  width: 318px;
+  height: 100%;
+  min-width: 318px;
+  min-height: 0;
+  flex: 0 0 318px;
+  flex-direction: column;
+  border-right: 1px solid #263d31;
+  color: #edf5ef;
+  background: #182820;
+}
+.rag-sidebar__header {
+  padding: 25px 22px 18px;
+  border-bottom: 1px solid rgba(228, 241, 231, 0.1);
+}
+.rag-sidebar__header .eyebrow {
+  margin-bottom: 7px;
+  color: #8ab99a;
+}
+.rag-sidebar__header h1 {
+  margin: 0;
+  color: #f7fbf8;
+  font-size: 24px;
+  font-weight: 720;
+}
+.rag-sidebar__header p:last-child {
+  margin: 12px 0 0;
+  color: #9db0a3;
+  font-size: 12px;
+}
+.rag-sidebar__body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 17px 13px 15px;
+  scrollbar-color: #476150 transparent;
+  scrollbar-width: thin;
+}
+.rag-sidebar__body::-webkit-scrollbar {
+  width: 7px;
+}
+.rag-sidebar__body::-webkit-scrollbar-thumb {
+  border-radius: 8px;
+  background: #476150;
+}
+.rag-sidebar__stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0 3px 14px;
+  border: 1px solid rgba(205, 226, 211, 0.18);
+  background: rgba(5, 15, 10, 0.24);
+}
+.rag-sidebar__stats div {
+  display: grid;
+  gap: 4px;
+  padding: 11px 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.rag-sidebar__stats strong {
+  color: #eaf5ed;
+  font-size: 19px;
+}
+.rag-sidebar__stats span {
+  color: #9db0a3;
+  font-size: 11px;
+}
+.rag-sidebar__footer {
+  display: grid;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 18px;
+}
+.rag-sidebar__footer .primary-button,
+.rag-sidebar__footer .sidebar-refresh-button {
+  width: 100%;
+}
+.rag-sidebar__footer .primary-button {
+  border: 1px solid #9fd2aa;
+  color: #143322;
+  background: #b9e6c2;
+}
+.rag-sidebar__footer .primary-button:hover {
+  border-color: #c8efd0;
+  background: #c8efd0;
+}
+.rag-sidebar__footer .sidebar-refresh-button {
+  border: 1px solid transparent;
+  color: #9db0a3;
+}
+.rag-sidebar__footer .sidebar-refresh-button:hover:not(:disabled) {
+  color: #eaf5ed;
+  background: rgba(136, 194, 149, 0.14);
+}
+.rag-content {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  background: #f9fbf9;
 }
 .page-header,
 .surface-heading,
@@ -501,10 +612,6 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-}
-.page-header {
-  align-items: flex-end;
-  margin-bottom: 28px;
 }
 .eyebrow,
 .modal-eyebrow {
@@ -523,15 +630,10 @@ h3,
 p {
   margin-top: 0;
 }
-h1 {
-  margin-bottom: 8px;
-  font-size: 30px;
-}
 h2 {
   margin-bottom: 0;
   font-size: 18px;
 }
-.page-description,
 .surface-heading p {
   margin-bottom: 0;
   color: #718077;
@@ -569,27 +671,6 @@ h2 {
   opacity: 0.55;
   cursor: default;
 }
-.summary-row {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 1px;
-  margin-bottom: 20px;
-  border: 1px solid #e0e7e2;
-  background: #e0e7e2;
-}
-.summary-item {
-  display: grid;
-  gap: 6px;
-  padding: 17px 21px;
-  background: #fff;
-}
-.summary-item strong {
-  font-size: 21px;
-}
-.summary-item span {
-  color: #7d8a82;
-  font-size: 11px;
-}
 .alert,
 .form-error {
   margin: 16px 0;
@@ -601,11 +682,12 @@ h2 {
   font-size: 13px;
 }
 .knowledge-surface {
+  min-height: 100%;
   border: 1px solid #e0e7e2;
   background: #fff;
 }
 .surface-heading {
-  padding: 21px 24px;
+  padding: 24px 30px 21px;
   border-bottom: 1px solid #edf0ed;
 }
 .surface-heading p {
@@ -616,6 +698,38 @@ h2 {
   gap: 10px;
   padding: 14px 24px;
   border-bottom: 1px solid #edf0ed;
+}
+.rag-sidebar .filters {
+  display: grid;
+  gap: 10px;
+  padding: 0;
+  border-bottom: 0;
+}
+.rag-sidebar .filters select {
+  width: 100%;
+}
+.rag-sidebar .search-field {
+  min-height: 38px;
+  border-color: rgba(205, 226, 211, 0.18);
+  border-radius: 7px;
+  color: #98b4a0;
+  background: rgba(5, 15, 10, 0.24);
+}
+.rag-sidebar .search-field:focus-within {
+  border-color: #80bf91;
+  box-shadow: 0 0 0 3px rgba(128, 191, 145, 0.12);
+}
+.rag-sidebar .search-field input {
+  color: #edf5ef;
+  background: transparent;
+}
+.rag-sidebar .search-field input::placeholder {
+  color: #789080;
+}
+.rag-sidebar .filters select {
+  border-color: rgba(205, 226, 211, 0.18);
+  color: #c4d3c8;
+  background: rgba(5, 15, 10, 0.24);
 }
 .search-field {
   display: flex;
@@ -784,6 +898,29 @@ h2 {
   color: #326d4c;
   background: #eef5ef;
 }
+.sidebar-refresh-button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 10px;
+  padding: 0 12px;
+  color: #555b57;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.sidebar-refresh-button:hover:not(:disabled) {
+  color: #202123;
+  background: #eeeeee;
+}
+.sidebar-refresh-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
 .icon-button--danger:hover:not(:disabled) {
   color: #b65353;
   background: #fff0f0;
@@ -884,25 +1021,50 @@ h2 {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
 }
+@media (max-width: 1100px) {
+  .rag-page {
+    padding: 24px 20px 40px;
+  }
+  .rag-workspace {
+    display: block;
+    height: auto;
+    min-height: 0;
+  }
+  .rag-sidebar {
+    width: auto;
+    height: auto;
+    min-width: 0;
+    flex: none;
+    border-right: 0;
+    border-bottom: 1px solid #263d31;
+    padding: 14px 12px 12px;
+  }
+  .rag-sidebar__body {
+    display: block;
+    overflow: visible;
+    padding: 0;
+  }
+  .rag-sidebar__footer {
+    display: flex;
+    margin-top: 12px;
+    padding-top: 0;
+  }
+  .rag-sidebar__footer > button {
+    flex: 1;
+  }
+  .rag-content {
+    overflow: visible;
+  }
+}
 @media (max-width: 700px) {
   .rag-page {
-    padding: 22px 16px 40px;
+    padding: 16px 12px 32px;
   }
-  .page-header {
-    align-items: flex-start;
-    flex-direction: column;
+  .rag-sidebar__footer {
+    display: grid;
   }
-  .page-header .primary-button {
+  .rag-sidebar__footer > button {
     width: 100%;
-  }
-  .summary-row {
-    grid-template-columns: 1fr 1fr;
-  }
-  .summary-item {
-    padding: 14px;
-  }
-  .filters {
-    padding-inline: 14px;
   }
   .document-list {
     padding-inline: 14px;

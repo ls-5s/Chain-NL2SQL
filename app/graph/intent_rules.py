@@ -17,9 +17,10 @@ class RuleDecision:
 # These terms are intentionally conservative and do not inspect database Schema.
 _DATA_ACTIONS = ("查询", "统计", "多少", "几个", "列出", "排行", "排名", "趋势", "平均", "总计", "汇总", "筛选", "比较", "分析", "最高", "最低", "超过", "找出")
 _DATA_OBJECTS = ("用户", "订单", "商品", "产品", "销售", "金额", "客户", "价格", "数量", "销量")
-_GENERAL_PATTERNS = ("你好", "您好", "嗨", "天气", "谢谢", "感谢", "写一封", "写个", "写一份", "翻译", "润色", "学习", "是什么", "解释", "故事", "健身", "推荐", "为什么", "代码", "改得")
+_GENERAL_PATTERNS = ("你好", "您好", "嗨", "天气", "谢谢", "感谢", "写一封", "写个", "写一份", "翻译", "润色", "学习", "是什么", "什么是", "解释", "故事", "健身", "推荐", "为什么", "代码", "改得")
 _AMBIGUOUS_PATTERNS = ("帮我看看", "帮我查一下", "查一下", "看看", "最近业务", "帮我总结", "总结一下")
 _DETAIL_TERMS = ("数量", "金额", "价格", "销量", "销售", "趋势", "排行", "排名", "平均", "总计", "本月", "今年", "最近", "每天", "每月")
+_KNOWLEDGE_MARKERS = ("内部资料", "公司制度", "内部知识", "政策文档", "知识库")
 
 
 def classify_by_rules(question: str) -> RuleDecision | None:
@@ -28,6 +29,13 @@ def classify_by_rules(question: str) -> RuleDecision | None:
     text = " ".join(question.strip().split()).lower()
     if not text:
         return RuleDecision(QueryIntent.GENERAL_CHAT, 1.0, "问题为空")
+
+    # Explicitly scoped internal-document questions must enter the grounded
+    # knowledge path even when they mention a business object such as orders
+    # or sales.  Routing them through the generic object/ambiguity rules would
+    # skip ACL-filtered retrieval and incorrectly ask the user to clarify.
+    if any(marker in text for marker in _KNOWLEDGE_MARKERS):
+        return RuleDecision(QueryIntent.GENERAL_CHAT, 0.99, "明确要求查询内部业务资料")
 
     if any(pattern in text for pattern in _GENERAL_PATTERNS) and not any(
         action in text for action in _DATA_ACTIONS

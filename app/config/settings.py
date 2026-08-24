@@ -33,7 +33,8 @@ class Settings:
     langsmith_project: str | None = None
     schema_retrieval_mode: str = "hybrid"
     schema_top_k: int = 5
-    schema_index_root: str = "data/schema_metadata"
+    # Keep generated runtime indexes separate from repository snapshots that may be read-only.
+    schema_index_root: str = "data/schema_metadata_runtime"
     schema_fallback_mode: str = "bm25"
     schema_embedding_model: str = "BAAI/bge-small-zh-v1.5"
     schema_reranker_model: str = "BAAI/bge-reranker-base"
@@ -74,7 +75,7 @@ class Settings:
             langsmith_project=_optional_env("LANGSMITH_PROJECT") or _optional_env("LANGCHAIN_PROJECT"),
             schema_retrieval_mode=os.getenv("SCHEMA_RETRIEVAL_MODE", "hybrid"),
             schema_top_k=int(os.getenv("SCHEMA_TOP_K", "5")),
-            schema_index_root=os.getenv("SCHEMA_INDEX_ROOT", "data/schema_metadata"),
+            schema_index_root=os.getenv("SCHEMA_INDEX_ROOT", "data/schema_metadata_runtime"),
             schema_fallback_mode=os.getenv("SCHEMA_FALLBACK_MODE", "bm25"),
             schema_embedding_model=os.getenv("SCHEMA_EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5"),
             schema_reranker_model=os.getenv("SCHEMA_RERANKER_MODEL", "BAAI/bge-reranker-base"),

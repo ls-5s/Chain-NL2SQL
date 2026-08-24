@@ -153,14 +153,10 @@ export function createAgentConversationStore(): AgentConversationStore {
   async function selectConversation(conversationId: string) {
     const requestId = ++selectionRequest;
     if (conversationId === activeConversationId.value) return;
-    if (conversationDetails.value[conversationId]) {
-      activeConversationId.value = conversationId;
-      if (drafts.value[conversationId] === undefined) {
-        drafts.value = { ...drafts.value, [conversationId]: "" };
-      }
-      return;
-    }
 
+    // A conversation can receive new messages in another tab or while it is
+    // cached locally. Refresh its detail on every switch so the page always
+    // renders the latest durable history.
     const detail = await fetchConversation(conversationId);
     conversationDetails.value = { ...conversationDetails.value, [conversationId]: detail };
     if (drafts.value[conversationId] === undefined) {

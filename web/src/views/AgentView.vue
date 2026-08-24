@@ -76,6 +76,14 @@ watch(
   { flush: "post" },
 );
 
+watch(
+  [() => store.activeConversationId.value, () => messages.value.length],
+  () => {
+    void scrollToBottom();
+  },
+  { flush: "post", immediate: true },
+);
+
 onMounted(async () => {
   try {
     databases.value = await fetchDatabases();
