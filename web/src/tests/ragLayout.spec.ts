@@ -51,10 +51,14 @@ describe("RagLayout", () => {
     expect(wrapper.text()).toContain("2 份资料");
     expect(wrapper.find(".rag-sidebar__stats").text()).toContain("1");
     expect((wrapper.get('[aria-label="搜索资料"]').element as HTMLInputElement).value).toBe("");
-    expect(wrapper.findAll(".filters select option")).toHaveLength(3);
-
     await wrapper.get('[aria-label="搜索资料"]').setValue("指标");
-    await wrapper.get('[aria-label="按分类筛选"]').setValue("数据字典");
+    await wrapper.get('[aria-label="按分类筛选"]').trigger("click");
+    expect(wrapper.findAll('[role="option"]')).toHaveLength(3);
+    const dataDictionaryOption = wrapper
+      .findAll('[role="option"]')
+      .find((option) => option.text() === "数据字典");
+    expect(dataDictionaryOption).toBeDefined();
+    await dataDictionaryOption?.trigger("click");
 
     expect(wrapper.emitted("update:query")).toEqual([["指标"]]);
     expect(wrapper.emitted("update:categoryFilter")).toEqual([["数据字典"]]);
@@ -79,7 +83,7 @@ describe("RagLayout", () => {
     expect(wrapper.emitted("refresh")).toHaveLength(1);
   });
 
-  it("hides upload for members and disables refresh while loading", () => {
+  it("shows but disables upload for members and disables refresh while loading", () => {
     const wrapper = mount(RagLayout, {
       props: {
         documents,
@@ -91,7 +95,7 @@ describe("RagLayout", () => {
       },
     });
 
-    expect(wrapper.find(".primary-button").exists()).toBe(false);
+    expect(wrapper.get(".primary-button").attributes("disabled")).toBeDefined();
     expect(wrapper.get('[aria-label="刷新列表"]').attributes("disabled")).toBeDefined();
   });
 });

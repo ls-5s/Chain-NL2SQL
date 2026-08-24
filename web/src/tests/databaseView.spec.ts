@@ -12,7 +12,7 @@ const api = vi.hoisted(() => ({
     status?: number;
   },
 }));
-const auth = vi.hoisted(() => ({ getDemoRole: vi.fn() }));
+const auth = vi.hoisted(() => ({ getDemoRole: vi.fn(), authState: { role: "member" as "super_admin" | "member" } }));
 
 vi.mock("@/api/client", () => api);
 vi.mock("@/auth/auth", () => auth);
@@ -38,6 +38,7 @@ describe("DatabasesView permissions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     auth.getDemoRole.mockReturnValue("super_admin");
+    auth.authState.role = "super_admin";
     api.fetchDatabaseConfigs.mockResolvedValue([structuredClone(database)]);
     api.updateDatabaseTableAccess.mockImplementation(
       async (databaseId: string, tableName: string, value: boolean) => ({
@@ -88,6 +89,7 @@ describe("DatabasesView permissions", () => {
 
   it("disables permission controls for members", async () => {
     auth.getDemoRole.mockReturnValue("member");
+    auth.authState.role = "member";
     const wrapper = mount(DatabasesView);
     await flushPromises();
 

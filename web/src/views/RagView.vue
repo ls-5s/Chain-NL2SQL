@@ -19,7 +19,7 @@ import {
 } from "@/api/client";
 import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import RagLayout from "@/layouts/RagLayout.vue";
-import { getDemoRole } from "@/auth/auth";
+import { usePermissions } from "@/composables/permissions";
 import type { KnowledgeDocument, KnowledgeDocumentStatus } from "@/types/api";
 
 type ACLPolicyType = "deny" | "all_authenticated" | "role" | "user";
@@ -43,7 +43,7 @@ const category = ref("业务规则");
 const fileInput = ref<HTMLInputElement | null>(null);
 let pollTimer: number | undefined;
 
-const isAdmin = computed(() => getDemoRole() === "super_admin");
+const { canManageKnowledge: isAdmin, isReadOnly } = usePermissions();
 const filteredDocuments = computed(() => {
   const needle = query.value.trim().toLowerCase();
   return documents.value.filter((document) => {
@@ -88,6 +88,7 @@ function updateAclDraft(document: KnowledgeDocument, key: keyof ACLDraft, value:
   }
 }
 async function saveAcl(document: KnowledgeDocument) {
+  if (!isAdmin.value) return;
   const draft = aclDraft(document);
   if (draft.policyType === "role" && !draft.role.trim()) {
     aclErrors.value = { ...aclErrors.value, [document.id]: "请填写允许访问的角色。" };
@@ -143,6 +144,7 @@ function syncPolling() {
   }
 }
 function openUpload() {
+  if (!isAdmin.value) return;
   selectedFile.value = null;
   category.value = "业务规则";
   errorMessage.value = "";
@@ -171,6 +173,7 @@ function handleDrop(event: DragEvent) {
   chooseFile(event.dataTransfer?.files?.[0]);
 }
 async function saveUpload() {
+  if (!isAdmin.value) return;
   if (!selectedFile.value) {
     errorMessage.value = "请选择要上传的文件。";
     return;
@@ -193,6 +196,7 @@ async function saveUpload() {
   }
 }
 function openDelete(document: KnowledgeDocument) {
+  if (!isAdmin.value) return;
   deleteTarget.value = document;
   errorMessage.value = "";
 }
@@ -200,6 +204,7 @@ function closeDelete() {
   if (!deleting.value) deleteTarget.value = null;
 }
 async function removeDocument() {
+  if (!isAdmin.value) return;
   const document = deleteTarget.value;
   if (!document || deleting.value) return;
   deleting.value = true;
@@ -249,6 +254,9 @@ onBeforeUnmount(() => {
       <p v-if="errorMessage && !uploadOpen && !deleteTarget" class="alert" role="alert">
         {{ errorMessage }}
       </p>
+      <p v-if="isReadOnly" class="permission-note" role="status">
+        <ShieldCheck :size="15" />当前为只读权限，资料管理操作仅超级管理员可执行。
+      </p>
       <section class="knowledge-surface" aria-labelledby="knowledge-title">
         <div class="surface-heading">
           <div>
@@ -283,13 +291,14 @@ onBeforeUnmount(() => {
               <div v-if="document.failure_message" class="failure-message">
                 <TriangleAlert :size="14" />{{ document.failure_message }}
               </div>
-              <div v-if="isAdmin" class="document-acl">
+              <div class="document-acl">
                 <ShieldCheck :size="15" aria-hidden="true" />
                 <label :for="`acl-policy-${document.id}`">访问范围</label>
                 <select
                   :id="`acl-policy-${document.id}`"
                   :value="aclDraft(document).policyType"
-                  :disabled="aclSavingId === document.id"
+                  :disabled="!isAdmin || aclSavingId === document.id"
+                  :title="!isAdmin ? '仅超级管理员可操作' : '修改访问范围'"
                   @change="
                     updateAclDraft(
                       document,
@@ -306,7 +315,7 @@ onBeforeUnmount(() => {
                 <input
                   v-if="aclDraft(document).policyType === 'role'"
                   :value="aclDraft(document).role"
-                  :disabled="aclSavingId === document.id"
+                  :disabled="!isAdmin || aclSavingId === document.id"
                   maxlength="64"
                   placeholder="角色"
                   aria-label="允许访问的角色"
@@ -317,7 +326,7 @@ onBeforeUnmount(() => {
                 <input
                   v-if="aclDraft(document).policyType === 'user'"
                   :value="aclDraft(document).userId"
-                  :disabled="aclSavingId === document.id"
+                  :disabled="!isAdmin || aclSavingId === document.id"
                   maxlength="128"
                   placeholder="用户 ID"
                   aria-label="允许访问的用户 ID"
@@ -328,9 +337,9 @@ onBeforeUnmount(() => {
                 <button
                   class="icon-button document-acl__save"
                   type="button"
-                  title="保存访问范围"
-                  aria-label="保存访问范围"
-                  :disabled="aclSavingId === document.id"
+                  :title="!isAdmin ? '仅超级管理员可操作' : '保存访问范围'"
+                  :aria-label="!isAdmin ? '保存访问范围，仅超级管理员可操作' : '保存访问范围'"
+                  :disabled="!isAdmin || aclSavingId === document.id"
                   @click="saveAcl(document)"
                 >
                   <LoaderCircle v-if="aclSavingId === document.id" class="spin" :size="16" />
@@ -351,12 +360,13 @@ onBeforeUnmount(() => {
                 :size="13"
               />{{ statusLabel(document.status) }}</span
             ><button
-              v-if="isAdmin"
               class="icon-button icon-button--danger"
               type="button"
-              title="删除资料"
-              aria-label="删除资料"
-              :disabled="document.status === 'uploading' || document.status === 'parsing'"
+              :title="!isAdmin ? '仅超级管理员可操作' : '删除资料'"
+              :aria-label="!isAdmin ? '删除资料，仅超级管理员可操作' : '删除资料'"
+              :disabled="
+                !isAdmin || document.status === 'uploading' || document.status === 'parsing'
+              "
               @click="openDelete(document)"
             >
               <Trash2 :size="16" />
@@ -446,6 +456,18 @@ onBeforeUnmount(() => {
   padding: 24px;
   color: #203027;
   background: #ffffff;
+}
+.permission-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 12px;
+  border: 1px solid #eadfc6;
+  border-radius: 7px;
+  padding: 8px 11px;
+  color: #7d6538;
+  background: #fffaf0;
+  font-size: 12px;
 }
 .page-header,
 .surface-heading,

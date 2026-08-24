@@ -22,7 +22,7 @@ def make_result_summary_node(
 
     def summarize(state: NL2SQLState) -> dict[str, object]:
         result = state.get("query_result")
-        fallback = _fallback(result)
+        fallback = _fallback(result, state.get("question", ""))
         base = {
             "final_answer": fallback,
             "answer_source": AnswerSource.DETERMINISTIC_FALLBACK,
@@ -58,7 +58,16 @@ def make_result_summary_node(
     return summarize
 
 
-def _fallback(result: QueryResult | None) -> str:
+def _fallback(result: QueryResult | None, question: str = "") -> str:
+    if result and result.rows and any(marker in question for marker in ("推荐", "一篇", "一个")):
+        title_index = next(
+            (index for index, column in enumerate(result.columns) if any(marker in column.lower() for marker in ("title", "name", "标题", "名称"))),
+            None,
+        )
+        if title_index is not None:
+            title = str(result.rows[0][title_index]).strip()
+            if title:
+                return f"推荐这篇：{title}。"
     count = result.row_count if result else 0
     suffix = "（结果已按安全策略截断）" if result and result.truncated else ""
     return f"查询完成，共返回 {count} 行结果。{suffix}"

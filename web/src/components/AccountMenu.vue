@@ -13,6 +13,7 @@ import {
 const props = defineProps<{
   open: boolean;
   username: string;
+  roleLabel: string;
 }>();
 
 const emit = defineEmits<{
@@ -43,24 +44,46 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleEscape));
       <section class="account-menu" aria-label="账户菜单" @mousedown.stop>
         <button class="account-menu__profile" type="button">
           <img class="account-menu__avatar" src="/user-avatar.jpg" alt="" />
-          <span><strong>{{ username }}</strong><small>Plus</small></span>
+          <span
+            ><strong>{{ username }}</strong
+            ><small>{{ roleLabel }}</small></span
+          >
           <ChevronRight :size="22" :stroke-width="1.8" aria-hidden="true" />
         </button>
 
         <div class="account-menu__divider" aria-hidden="true" />
 
         <div class="account-menu__actions">
-          <button type="button"><Sparkles :size="21" aria-hidden="true" /><span class="account-menu__label">升级套餐</span></button>
-          <button type="button"><Palette :size="21" aria-hidden="true" /><span class="account-menu__label">个性化</span></button>
-          <button type="button"><CircleUserRound :size="22" aria-hidden="true" /><span class="account-menu__label">个人资料</span></button>
-          <button type="button"><Settings :size="22" aria-hidden="true" /><span class="account-menu__label">设置</span></button>
+          <button type="button">
+            <Sparkles :size="21" aria-hidden="true" /><span class="account-menu__label"
+              >升级套餐</span
+            >
+          </button>
+          <button type="button">
+            <Palette :size="21" aria-hidden="true" /><span class="account-menu__label">个性化</span>
+          </button>
+          <button type="button">
+            <CircleUserRound :size="22" aria-hidden="true" /><span class="account-menu__label"
+              >个人资料</span
+            >
+          </button>
+          <button type="button">
+            <Settings :size="22" aria-hidden="true" /><span class="account-menu__label">设置</span>
+          </button>
         </div>
 
         <div class="account-menu__divider" aria-hidden="true" />
 
         <div class="account-menu__actions">
-          <button type="button"><CircleHelp :size="22" aria-hidden="true" /><span class="account-menu__label">帮助</span><ChevronRight :size="21" /></button>
-          <button type="button" @click="requestLogout"><LogOut :size="22" aria-hidden="true" /><span class="account-menu__label">退出登录</span></button>
+          <button type="button">
+            <CircleHelp :size="22" aria-hidden="true" /><span class="account-menu__label">帮助</span
+            ><ChevronRight :size="21" />
+          </button>
+          <button type="button" @click="requestLogout">
+            <LogOut :size="22" aria-hidden="true" /><span class="account-menu__label"
+              >退出登录</span
+            >
+          </button>
         </div>
       </section>
     </div>

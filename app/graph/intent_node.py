@@ -20,6 +20,17 @@ def make_intent_gate_node(llm_client: LLMClient, timeout_seconds: float, confide
         if state.get("intent") is not None:
             return {"intent": state["intent"]}
         rule_decision = classify_by_rules(state["question"])
+        context_follow_up = _is_database_follow_up(state["question"], state.get("conversation_context", ""))
+        if context_follow_up:
+            # Elliptical follow-ups such as "推荐一篇" are data requests when
+            # the current conversation already contains an article result.
+            return {
+                "intent": QueryIntent.DATA_QUERY,
+                "intent_confidence": 0.93,
+                "intent_reason": "结合当前会话中的数据库结果理解省略主语或指代",
+                "intent_source": "conversation_context",
+                "intent_classification_valid": True,
+            }
         if rule_decision is not None:
             result = {
                 "intent": rule_decision.intent,
@@ -59,6 +70,23 @@ def make_intent_gate_node(llm_client: LLMClient, timeout_seconds: float, confide
         return result
 
     return classify
+
+
+def _is_database_follow_up(question: str, conversation_context: str) -> bool:
+    """Recognize short follow-ups that refer to a previous database result."""
+
+    if not conversation_context or not question.strip():
+        return False
+    normalized = " ".join(question.strip().split()).lower()
+    # Do not reinterpret explicit meta questions about the chat itself.
+    if any(pattern in normalized for pattern in ("上一个问题是什么", "刚才问了什么", "之前问了什么")):
+        return False
+    has_follow_up_language = any(
+        marker in normalized
+        for marker in ("推荐", "一篇", "一个", "这篇", "这类", "这些", "刚才", "继续", "数据库里面", "数据库里的")
+    )
+    has_article_result = any(marker in conversation_context.lower() for marker in ("articles", "文章", "generated_sql"))
+    return has_follow_up_language and has_article_result
 
 
 def _parse_intent(content: str) -> dict[str, Any] | None:

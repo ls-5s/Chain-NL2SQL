@@ -1,9 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const api = vi.hoisted(() => ({ fetchSession: vi.fn(), loginSession: vi.fn(), logoutSession: vi.fn() }));
+const api = vi.hoisted(() => ({
+  fetchSession: vi.fn(),
+  loginSession: vi.fn(),
+  logoutSession: vi.fn(),
+}));
 vi.mock("@/api/client", () => api);
 
-import { getDemoUsername, isAuthenticated, login, logout } from "@/auth/auth";
+import {
+  authState,
+  getDemoRole,
+  getDemoUsername,
+  isAuthenticated,
+  login,
+  logout,
+} from "@/auth/auth";
 
 describe("server session authentication", () => {
   beforeEach(() => vi.resetAllMocks());
@@ -15,9 +26,24 @@ describe("server session authentication", () => {
   });
 
   it("logs in and logs out through the API", async () => {
-    api.loginSession.mockResolvedValue({ authenticated: true, username: "admin" });
+    api.loginSession.mockResolvedValue({
+      authenticated: true,
+      username: "admin",
+      role: "super_admin",
+    });
     await expect(login({ username: "admin", password: "123456" })).resolves.toBe(true);
+    expect(getDemoRole()).toBe("super_admin");
+    expect(authState.authenticated).toBe(true);
     await logout();
     expect(api.logoutSession).toHaveBeenCalledOnce();
+    expect(getDemoRole()).toBe("member");
+    expect(authState.authenticated).toBe(false);
+  });
+
+  it("updates the reactive role when the server session is refreshed", async () => {
+    api.fetchSession.mockResolvedValue({ authenticated: true, username: "alice", role: "member" });
+    await expect(isAuthenticated()).resolves.toBe(true);
+    expect(getDemoUsername()).toBe("alice");
+    expect(getDemoRole()).toBe("member");
   });
 });

@@ -10,7 +10,7 @@ const api = vi.hoisted(() => ({
     status?: number;
   },
 }));
-const auth = vi.hoisted(() => ({ getDemoRole: vi.fn() }));
+const auth = vi.hoisted(() => ({ getDemoRole: vi.fn(), authState: { role: "member" as "super_admin" | "member" } }));
 
 vi.mock("@/api/client", () => api);
 vi.mock("@/auth/auth", () => auth);
@@ -37,6 +37,7 @@ describe("RagView", () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     auth.getDemoRole.mockReturnValue("super_admin");
+    auth.authState.role = "super_admin";
     api.fetchKnowledgeDocuments.mockResolvedValue([]);
   });
 
@@ -44,14 +45,15 @@ describe("RagView", () => {
     vi.useRealTimers();
   });
 
-  it("loads an empty state and hides write controls for members", async () => {
+  it("loads an empty state and disables write controls for members", async () => {
     auth.getDemoRole.mockReturnValue("member");
+    auth.authState.role = "member";
     const wrapper = mount(RagView);
     await flushPromises();
 
     expect(wrapper.text()).toContain("暂无资料");
     expect(wrapper.find(".document-list").exists()).toBe(false);
-    expect(wrapper.find("button.primary-button").exists()).toBe(false);
+    expect(wrapper.get("button.primary-button").attributes("disabled")).toBeDefined();
   });
 
   it("uploads a document and polls until indexing completes", async () => {

@@ -1,42 +1,45 @@
 import { fetchSession, loginSession, logoutSession } from "@/api/client";
 import type { LoginCredentials } from "@/auth/types";
 import type { UserRole } from "@/types/api";
+import { reactive } from "vue";
 
-let authenticated = false;
-let username = "admin";
-let role: UserRole = "member";
+export const authState = reactive({
+  authenticated: false,
+  username: "admin",
+  role: "member" as UserRole,
+});
 
 export function getDemoUsername(): string {
-  return username;
+  return authState.username;
 }
 
 export function getDemoRole(): UserRole {
-  return role;
+  return authState.role;
 }
 
 export async function isAuthenticated(): Promise<boolean> {
   try {
     const session = await fetchSession();
-    authenticated = session.authenticated;
-    username = session.username || username;
-    role = session.role || "member";
+    authState.authenticated = session.authenticated;
+    authState.username = session.username || authState.username;
+    authState.role = session.role || "member";
   } catch {
-    authenticated = false;
-    role = "member";
+    authState.authenticated = false;
+    authState.role = "member";
   }
-  return authenticated;
+  return authState.authenticated;
 }
 
 export async function login(credentials: LoginCredentials): Promise<boolean> {
   try {
     const session = await loginSession(credentials);
-    authenticated = session.authenticated;
-    username = session.username || username;
-    role = session.role || "member";
-    return authenticated;
+    authState.authenticated = session.authenticated;
+    authState.username = session.username || authState.username;
+    authState.role = session.role || "member";
+    return authState.authenticated;
   } catch {
-    authenticated = false;
-    role = "member";
+    authState.authenticated = false;
+    authState.role = "member";
     return false;
   }
 }
@@ -45,7 +48,7 @@ export async function logout(): Promise<void> {
   try {
     await logoutSession();
   } finally {
-    authenticated = false;
-    role = "member";
+    authState.authenticated = false;
+    authState.role = "member";
   }
 }

@@ -153,7 +153,13 @@ const filterOptions = [
             @click="emit('refresh')"
           >
             <RefreshCw :class="{ spin: loading }" :size="15" />刷新列表</button
-          ><button v-if="isAdmin" class="sidebar-add-button" type="button" @click="emit('add')">
+          ><button
+            class="sidebar-add-button"
+            type="button"
+            :disabled="!isAdmin"
+            :title="!isAdmin ? '仅超级管理员可操作' : '添加数据库'"
+            @click="emit('add')"
+          >
             <Plus :size="16" />添加数据库
           </button>
         </footer>
@@ -466,6 +472,10 @@ const filterOptions = [
 .sidebar-add-button:hover {
   border-color: #c8efd0;
   background: #c8efd0;
+}
+.sidebar-add-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 .sidebar-state {
   display: flex;

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { LoaderCircle, RefreshCw, Search, UploadCloud } from "lucide-vue-next";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { Check, ChevronDown, LoaderCircle, RefreshCw, Search, UploadCloud } from "lucide-vue-next";
 import type { KnowledgeDocument } from "@/types/api";
 
 const props = defineProps<{
@@ -33,6 +33,51 @@ const processingCount = computed(
 const failedCount = computed(
   () => props.documents.filter((item) => item.status === "failed").length,
 );
+const categoryOpen = ref(false);
+const categoryMenu = ref<HTMLDivElement | null>(null);
+const categoryOptions = computed(() => [
+  { value: "all", label: "全部分类" },
+  ...categories.value.map((item) => ({ value: item, label: item })),
+]);
+const selectedCategoryLabel = computed(
+  () =>
+    categoryOptions.value.find((item) => item.value === props.categoryFilter)?.label ?? "全部分类",
+);
+
+function selectCategory(value: string) {
+  emit("update:categoryFilter", value);
+  categoryOpen.value = false;
+}
+function toggleCategoryMenu() {
+  categoryOpen.value = !categoryOpen.value;
+}
+function handleCategoryKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") {
+    categoryOpen.value = false;
+    return;
+  }
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    toggleCategoryMenu();
+    return;
+  }
+  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+  event.preventDefault();
+  const currentIndex = categoryOptions.value.findIndex(
+    (item) => item.value === props.categoryFilter,
+  );
+  const offset = event.key === "ArrowDown" ? 1 : -1;
+  const nextIndex =
+    (currentIndex + offset + categoryOptions.value.length) % categoryOptions.value.length;
+  selectCategory(categoryOptions.value[nextIndex].value);
+}
+function handleOutsidePointer(event: PointerEvent) {
+  if (categoryMenu.value && !categoryMenu.value.contains(event.target as Node)) {
+    categoryOpen.value = false;
+  }
+}
+onMounted(() => window.addEventListener("pointerdown", handleOutsidePointer));
+onBeforeUnmount(() => window.removeEventListener("pointerdown", handleOutsidePointer));
 </script>
 
 <template>
@@ -73,17 +118,54 @@ const failedCount = computed(
               @input="emit('update:query', ($event.target as HTMLInputElement).value)"
             />
           </label>
-          <select
-            :value="categoryFilter"
-            aria-label="按分类筛选"
-            @change="emit('update:categoryFilter', ($event.target as HTMLSelectElement).value)"
-          >
-            <option value="all">全部分类</option>
-            <option v-for="item in categories" :key="item" :value="item">{{ item }}</option>
-          </select>
+          <div ref="categoryMenu" class="category-select">
+            <button
+              class="category-select__trigger"
+              type="button"
+              role="combobox"
+              aria-label="按分类筛选"
+              :aria-expanded="categoryOpen"
+              aria-controls="category-options"
+              @click="toggleCategoryMenu"
+              @keydown="handleCategoryKeydown"
+            >
+              <span>{{ selectedCategoryLabel }}</span>
+              <ChevronDown :class="{ 'category-select__chevron--open': categoryOpen }" :size="16" />
+            </button>
+            <Transition name="category-menu">
+              <div
+                v-if="categoryOpen"
+                id="category-options"
+                class="category-select__menu"
+                role="listbox"
+                aria-label="资料分类"
+              >
+                <p class="category-select__label">筛选分类</p>
+                <button
+                  v-for="option in categoryOptions"
+                  :key="option.value"
+                  class="category-select__option"
+                  :class="{ 'category-select__option--active': option.value === categoryFilter }"
+                  type="button"
+                  role="option"
+                  :aria-selected="option.value === categoryFilter"
+                  @click="selectCategory(option.value)"
+                >
+                  <span>{{ option.label }}</span>
+                  <Check v-if="option.value === categoryFilter" :size="15" />
+                </button>
+              </div>
+            </Transition>
+          </div>
         </div>
         <footer class="rag-sidebar__footer">
-          <button v-if="isAdmin" class="primary-button" type="button" @click="emit('upload')">
+          <button
+            class="primary-button"
+            type="button"
+            :disabled="!isAdmin"
+            :title="!isAdmin ? '仅超级管理员可操作' : '上传资料'"
+            @click="emit('upload')"
+          >
             <UploadCloud :size="17" />上传资料
           </button>
           <button
@@ -226,9 +308,6 @@ const failedCount = computed(
   gap: 10px;
   padding: 0;
 }
-.rag-sidebar .filters select {
-  width: 100%;
-}
 .rag-sidebar .search-field {
   min-height: 38px;
   border-color: rgba(205, 226, 211, 0.18);
@@ -247,19 +326,6 @@ const failedCount = computed(
 .rag-sidebar .search-field input::placeholder {
   color: #789080;
 }
-.rag-sidebar .filters select {
-  border-color: rgba(205, 226, 211, 0.18);
-  color: #c4d3c8;
-  background: rgba(5, 15, 10, 0.24);
-}
-.rag-sidebar .filters select option {
-  color: #edf5ef;
-  background-color: #182820;
-}
-.rag-sidebar .filters select option:checked {
-  color: #ffffff;
-  background-color: #326d4c;
-}
 .search-field {
   display: flex;
   flex: 1;
@@ -270,8 +336,7 @@ const failedCount = computed(
   padding: 0 10px;
   color: #7b887f;
 }
-.search-field input,
-.filters select {
+.search-field input {
   height: 36px;
   border: 0;
   outline: 0;
@@ -282,11 +347,97 @@ const failedCount = computed(
 .search-field input {
   width: 100%;
 }
-.filters select {
-  min-width: 130px;
-  border: 1px solid #dce4dd;
-  border-radius: 6px;
+.category-select {
+  position: relative;
+  width: 100%;
+}
+.category-select__trigger {
+  display: flex;
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid rgba(205, 226, 211, 0.22);
+  border-radius: 10px;
+  padding: 0 13px 0 15px;
+  color: #e1eee4;
+  background: #1c3026;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease;
+}
+.category-select__trigger:hover,
+.category-select__trigger[aria-expanded="true"] {
+  border-color: #78b58b;
+  background: #21382b;
+  box-shadow: 0 0 0 3px rgba(128, 191, 145, 0.1);
+}
+.category-select__chevron--open {
+  transform: rotate(180deg);
+}
+.category-select__menu {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 8px);
+  right: 0;
+  left: 0;
+  display: grid;
+  gap: 3px;
+  border: 1px solid #3a5a46;
+  border-radius: 11px;
+  padding: 7px;
+  background: #20372a;
+  box-shadow: 0 16px 28px rgba(3, 12, 7, 0.32);
+}
+.category-select__label {
+  margin: 2px 8px 4px;
+  color: #86a995;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+.category-select__option {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 0;
+  border-radius: 7px;
   padding: 0 9px;
+  color: #c1d2c5;
+  background: transparent;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.category-select__option:hover,
+.category-select__option:focus-visible {
+  color: #eff8f0;
+  background: #2a4a37;
+  outline: 0;
+}
+.category-select__option--active {
+  color: #eaffed;
+  background: #326d4c;
+  font-weight: 700;
+}
+.category-menu-enter-active,
+.category-menu-leave-active {
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+  transform-origin: top center;
+}
+.category-menu-enter-from,
+.category-menu-leave-to {
+  opacity: 0;
+  transform: translateY(-5px) scale(0.98);
 }
 .sidebar-refresh-button {
   display: inline-flex;

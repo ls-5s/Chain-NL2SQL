@@ -75,6 +75,8 @@ def build_sql_generation_prompt() -> ChatPromptTemplate:
                 "Schema 上下文：\n{schema_context}\n\n"
                 "用户问题：{question}\n\n"
                 "会话上下文（仅作线索，当前问题优先）：\n{conversation_context}\n\n"
+                "如果当前问题是省略主语的追问（例如‘推荐一篇’、‘我数据库里面的’），"
+                "必须从会话上下文补全对象；当用户要求一篇或一个结果时，生成 SQL 时限制为一行。\n\n"
                 "只输出 SQL。",
             ),
         ]

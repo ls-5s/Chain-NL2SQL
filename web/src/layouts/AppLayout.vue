@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import {
   CircleHelp,
@@ -14,10 +14,12 @@ import {
   X,
 } from "lucide-vue-next";
 import AccountMenu from "@/components/AccountMenu.vue";
-import { getDemoUsername, logout } from "@/auth/auth";
+import { authState, logout } from "@/auth/auth";
+import { usePermissions } from "@/composables/permissions";
 
 const router = useRouter();
-const currentUser = getDemoUsername();
+const { roleLabel, isReadOnly } = usePermissions();
+const currentUser = computed(() => authState.username);
 const mobileNavigation = ref<HTMLDialogElement | null>(null);
 const profileMenuOpen = ref(false);
 
@@ -81,6 +83,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleAgentShortcut)
         </button>
         <span class="header-divider" aria-hidden="true" />
         <span class="service-status"><i aria-hidden="true" />服务正常</span>
+        <span class="role-chip" :class="{ 'role-chip--readonly': isReadOnly }">
+          {{ roleLabel }}
+        </span>
         <button
           class="profile-button"
           type="button"
@@ -186,7 +191,12 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleAgentShortcut)
 
     <main class="app-main"><slot /></main>
 
-    <AccountMenu v-model:open="profileMenuOpen" :username="currentUser" @logout="signOut" />
+    <AccountMenu
+      v-model:open="profileMenuOpen"
+      :username="currentUser"
+      :role-label="roleLabel"
+      @logout="signOut"
+    />
 
     <dialog ref="mobileNavigation" class="mobile-navigation" @click.self="closeMobileNavigation">
       <div class="mobile-navigation__header">
@@ -202,7 +212,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleAgentShortcut)
       </div>
       <nav class="mobile-navigation__links" aria-label="主导航">
         <RouterLink to="/agent" @click="closeMobileNavigation"
-          ><span class="agent-icon" aria-hidden="true"><Sparkles :size="17" :stroke-width="1.8" /></span
+          ><span class="agent-icon" aria-hidden="true"
+            ><Sparkles :size="17" :stroke-width="1.8" /></span
           >Agent</RouterLink
         >
         <RouterLink to="/rag" @click="closeMobileNavigation"
@@ -211,9 +222,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleAgentShortcut)
         <RouterLink to="/databases" @click="closeMobileNavigation"
           ><Database :size="19" />数据库</RouterLink
         >
-        <RouterLink to="/mcp" @click="closeMobileNavigation"
-          ><Blocks :size="19" />MCP</RouterLink
-        >
+        <RouterLink to="/mcp" @click="closeMobileNavigation"><Blocks :size="19" />MCP</RouterLink>
         <RouterLink to="/members" @click="closeMobileNavigation"
           ><UsersRound :size="19" />成员</RouterLink
         >
@@ -362,6 +371,23 @@ kbd {
   border-radius: 50%;
   background: #32a26f;
   box-shadow: 0 0 0 3px #e7f6ee;
+}
+
+.role-chip {
+  border: 1px solid #c9dfce;
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: #2e6841;
+  background: #eff9f1;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.role-chip--readonly {
+  border-color: #eadfc6;
+  color: #7d6538;
+  background: #fffaf0;
 }
 
 .profile-button {
@@ -656,5 +682,4 @@ kbd {
     display: none !important;
   }
 }
-
 </style>

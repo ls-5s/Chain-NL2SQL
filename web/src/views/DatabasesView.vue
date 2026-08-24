@@ -20,7 +20,7 @@ import {
   updateDatabase,
   updateDatabaseTableAccess,
 } from "@/api/client";
-import { getDemoRole } from "@/auth/auth";
+import { usePermissions } from "@/composables/permissions";
 import DatabaseLayout from "@/layouts/DatabaseLayout.vue";
 import type { Database, DatabaseDialect } from "@/types/api";
 
@@ -36,7 +36,7 @@ const tableFilter = ref<"all" | "enabled" | "disabled">("all");
 const errorMessage = ref("");
 const modalOpen = ref(false);
 const editingDatabase = ref<Database | null>(null);
-const isAdmin = computed(() => getDemoRole() === "super_admin");
+const { canManageDatabases: isAdmin, isReadOnly } = usePermissions();
 const form = reactive({
   name: "",
   dialect: "sqlite" as DatabaseDialect,
@@ -115,6 +115,7 @@ function resetForm() {
 }
 
 function openCreate() {
+  if (!isAdmin.value) return;
   editingDatabase.value = null;
   resetForm();
   errorMessage.value = "";
@@ -122,6 +123,7 @@ function openCreate() {
 }
 
 function openEdit(database: Database) {
+  if (!isAdmin.value) return;
   editingDatabase.value = database;
   Object.assign(form, {
     name: database.name,
@@ -155,6 +157,7 @@ function configPayload() {
 }
 
 async function saveDatabase() {
+  if (!isAdmin.value) return;
   if (!form.name.trim()) {
     errorMessage.value = "请输入数据库名称。";
     return;
@@ -200,6 +203,7 @@ async function saveDatabase() {
 }
 
 async function handleTest(database: Database) {
+  if (!isAdmin.value) return;
   testingId.value = database.id;
   errorMessage.value = "";
   try {
@@ -279,6 +283,7 @@ async function updateAllTableAccess(value: boolean) {
 }
 
 async function removeDatabase(database: Database) {
+  if (!isAdmin.value) return;
   if (database.id === "demo" || !window.confirm(`确定删除“${database.name}”吗？`)) return;
 
   try {
@@ -296,6 +301,9 @@ onMounted(() => void loadDatabases());
 <template>
   <main class="databases-page">
     <p v-if="errorMessage && !modalOpen" class="alert" role="alert">{{ errorMessage }}</p>
+    <p v-if="isReadOnly" class="permission-note" role="status">
+      <ShieldCheck :size="15" />当前为只读权限，数据库管理操作仅超级管理员可执行。
+    </p>
 
     <DatabaseLayout
       :databases="databases"
@@ -328,10 +336,13 @@ onMounted(() => void loadDatabases());
             type="button"
             :disabled="!isAdmin || selectedDatabase.enabled || activatingId !== '' || batchUpdating"
             :title="
-              selectedDatabase.enabled
-                ? '当前 Agent 正在使用此数据库'
-                : '启用此数据库并停用其他数据库'
+              !isAdmin
+                ? '仅超级管理员可操作'
+                : selectedDatabase.enabled
+                  ? '当前 Agent 正在使用此数据库'
+                  : '启用此数据库并停用其他数据库'
             "
+            :aria-label="!isAdmin ? '启用数据库，仅超级管理员可操作' : '启用数据库'"
             @click="activateDatabase(selectedDatabase)"
           >
             <LoaderCircle v-if="activatingId === selectedDatabase.id" class="spin" :size="13" />
@@ -341,7 +352,9 @@ onMounted(() => void loadDatabases());
                 ? "启用中"
                 : selectedDatabase.enabled
                   ? "已启用"
-                  : "已停用 · 点击启用"
+                  : isAdmin
+                    ? "已停用 · 点击启用"
+                    : "已停用 · 仅管理员可启用"
             }}
           </button>
         </header>
@@ -390,6 +403,7 @@ onMounted(() => void loadDatabases());
                 class="text-action"
                 type="button"
                 :disabled="!isAdmin || !selectedDatabase.enabled || batchUpdating"
+                title="仅超级管理员可操作"
                 @click="updateAllTableAccess(true)"
               >
                 全部授权
@@ -398,6 +412,7 @@ onMounted(() => void loadDatabases());
                 class="text-action text-action--muted"
                 type="button"
                 :disabled="!isAdmin || !selectedDatabase.enabled || batchUpdating"
+                title="仅超级管理员可操作"
                 @click="updateAllTableAccess(false)"
               >
                 全部取消
@@ -428,6 +443,7 @@ onMounted(() => void loadDatabases());
                   type="checkbox"
                   :checked="table.agent_access"
                   :disabled="!isAdmin || !selectedDatabase.enabled || batchUpdating"
+                  :title="!isAdmin ? '仅超级管理员可操作' : '启用或停用此数据表'"
                   :aria-label="`${table.table_name} ${table.agent_access ? '已授权' : '未授权'}`"
                   @change="
                     toggleTable(
@@ -451,30 +467,43 @@ onMounted(() => void loadDatabases());
             class="secondary-button"
             type="button"
             :disabled="!isAdmin || testingId === selectedDatabase.id || batchUpdating"
+            :title="!isAdmin ? '仅超级管理员可操作' : '测试连接'"
+            :aria-label="!isAdmin ? '测试连接，仅超级管理员可操作' : '测试连接'"
             @click="handleTest(selectedDatabase)"
           >
             <LoaderCircle v-if="testingId === selectedDatabase.id" class="spin" :size="15" />
             <RefreshCw v-else :size="15" />
             {{ testingId === selectedDatabase.id ? "测试中" : "测试连接" }}
           </button>
-          <div v-if="isAdmin" class="action-group">
+          <div class="action-group">
             <button
               class="icon-button"
               type="button"
-              title="编辑数据库"
-              aria-label="编辑数据库"
-              :disabled="batchUpdating"
+              :title="!isAdmin ? '仅超级管理员可操作' : '编辑数据库'"
+              :aria-label="!isAdmin ? '编辑数据库，仅超级管理员可操作' : '编辑数据库'"
+              :disabled="!isAdmin || batchUpdating"
               @click="openEdit(selectedDatabase)"
             >
               <Pencil :size="16" />
             </button>
             <button
-              v-if="selectedDatabase.id !== 'demo'"
               class="icon-button icon-button--danger"
               type="button"
-              title="删除数据库"
-              aria-label="删除数据库"
-              :disabled="batchUpdating"
+              :title="
+                !isAdmin
+                  ? '仅超级管理员可操作'
+                  : selectedDatabase.id === 'demo'
+                    ? '演示数据库不能删除'
+                    : '删除数据库'
+              "
+              :aria-label="
+                !isAdmin
+                  ? '删除数据库，仅超级管理员可操作'
+                  : selectedDatabase.id === 'demo'
+                    ? '删除数据库，演示数据库不能删除'
+                    : '删除数据库'
+              "
+              :disabled="!isAdmin || selectedDatabase.id === 'demo' || batchUpdating"
               @click="removeDatabase(selectedDatabase)"
             >
               <Trash2 :size="16" />
@@ -596,6 +625,18 @@ onMounted(() => void loadDatabases());
   padding: 40px 32px 48px;
   color: #202123;
   background: #ffffff;
+}
+.permission-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 12px;
+  border: 1px solid #eadfc6;
+  border-radius: 7px;
+  padding: 8px 11px;
+  color: #7d6538;
+  background: #fffaf0;
+  font-size: 12px;
 }
 
 .detail-header,

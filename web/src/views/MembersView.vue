@@ -17,7 +17,7 @@ import {
   fetchMembers,
   updateMember,
 } from "@/api/client";
-import { getDemoRole } from "@/auth/auth";
+import { usePermissions } from "@/composables/permissions";
 import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import type { Member } from "@/types/api";
 
@@ -29,8 +29,7 @@ const modalOpen = ref(false);
 const deleteTarget = ref<Member | null>(null);
 const deleting = ref(false);
 const editingMember = ref<Member | null>(null);
-const role = getDemoRole();
-const isAdmin = computed(() => role === "super_admin");
+const { canManageMembers: isAdmin, isReadOnly } = usePermissions();
 const form = reactive({ username: "", password: "", confirmPassword: "" });
 
 async function loadMembers() {
@@ -46,6 +45,7 @@ async function loadMembers() {
 }
 
 function openCreate() {
+  if (!isAdmin.value) return;
   editingMember.value = null;
   form.username = "";
   form.password = "";
@@ -55,6 +55,7 @@ function openCreate() {
 }
 
 function openEdit(member: Member) {
+  if (!isAdmin.value || member.role === "super_admin") return;
   editingMember.value = member;
   form.username = member.username;
   form.password = "";
@@ -68,6 +69,7 @@ function closeModal() {
 }
 
 async function saveMember() {
+  if (!isAdmin.value) return;
   if (!form.username.trim()) {
     errorMessage.value = "请输入用户名。";
     return;
@@ -102,6 +104,7 @@ async function saveMember() {
 }
 
 function openDelete(member: Member) {
+  if (!isAdmin.value || member.role === "super_admin") return;
   deleteTarget.value = member;
   errorMessage.value = "";
 }
@@ -146,11 +149,17 @@ onMounted(() => void loadMembers());
           <p>密码仅保存为安全哈希，页面不会显示明文密码。</p>
         </div>
         <div class="surface-actions">
-          <button v-if="isAdmin" class="primary-button" type="button" @click="openCreate">
+          <button
+            class="primary-button"
+            type="button"
+            :disabled="!isAdmin"
+            :title="!isAdmin ? '仅超级管理员可操作' : '添加成员'"
+            @click="openCreate"
+          >
             <Plus :size="17" /> 添加成员
           </button>
           <span class="permission-note"
-            ><ShieldCheck :size="15" /> {{ isAdmin ? "管理员权限" : "只读权限" }}</span
+            ><ShieldCheck :size="15" /> {{ isReadOnly ? "只读权限" : "管理员权限" }}</span
           >
         </div>
       </div>
@@ -192,12 +201,25 @@ onMounted(() => void loadMembers());
             </div>
           </div>
 
-          <div v-if="isAdmin && member.role !== 'super_admin'" class="member-card__actions">
+          <div class="member-card__actions">
             <button
               class="icon-button"
               type="button"
-              aria-label="编辑成员"
-              title="编辑成员"
+              :aria-label="
+                !isAdmin
+                  ? '编辑成员，仅超级管理员可操作'
+                  : member.role === 'super_admin'
+                    ? '编辑成员，超级管理员账号受保护'
+                    : '编辑成员'
+              "
+              :disabled="!isAdmin || member.role === 'super_admin'"
+              :title="
+                !isAdmin
+                  ? '仅超级管理员可操作'
+                  : member.role === 'super_admin'
+                    ? '超级管理员账号受保护'
+                    : '编辑成员'
+              "
               @click="openEdit(member)"
             >
               <Pencil :size="16" />
@@ -205,8 +227,21 @@ onMounted(() => void loadMembers());
             <button
               class="icon-button icon-button--danger"
               type="button"
-              aria-label="删除成员"
-              title="删除成员"
+              :aria-label="
+                !isAdmin
+                  ? '删除成员，仅超级管理员可操作'
+                  : member.role === 'super_admin'
+                    ? '删除成员，超级管理员账号受保护'
+                    : '删除成员'
+              "
+              :disabled="!isAdmin || member.role === 'super_admin'"
+              :title="
+                !isAdmin
+                  ? '仅超级管理员可操作'
+                  : member.role === 'super_admin'
+                    ? '超级管理员账号受保护'
+                    : '删除成员'
+              "
               @click="openDelete(member)"
             >
               <Trash2 :size="16" />

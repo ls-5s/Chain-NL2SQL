@@ -59,7 +59,7 @@ describe("DatabaseLayout", () => {
     });
     expect(loading.text()).toContain("正在加载数据源");
     expect(loading.get(".sidebar-refresh-button").attributes("disabled")).toBeDefined();
-    expect(loading.findAll(".sidebar-add-button")).toHaveLength(0);
+    expect(loading.get(".sidebar-add-button").attributes("disabled")).toBeDefined();
 
     const empty = mount(DatabaseLayout, {
       props: { databases: [], selectedDatabaseId: "", loading: false, isAdmin: true },

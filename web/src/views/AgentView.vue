@@ -14,7 +14,8 @@ import {
 import { createResultReference, fetchDatabases } from "@/api/client";
 import { useAgentConversationStore } from "@/composables/agentConversations";
 import { renderMarkdown } from "@/utils/markdown";
-import type { QueryIntent, QueryResponse, QueryResult, QueryStatus } from "@/types/api";
+import { resultCellText, resultColumns } from "@/utils/resultTable";
+import type { QueryIntent, QueryResponse, QueryStatus } from "@/types/api";
 
 const databases = ref<string[]>([]);
 const conversation = ref<HTMLElement | null>(null);
@@ -30,7 +31,9 @@ const question = computed({
 });
 const databaseId = computed({
   get: () => store.activeConversation.value.databaseId,
-  set: (value: string) => { void store.setDatabaseId(value); },
+  set: (value: string) => {
+    void store.setDatabaseId(value);
+  },
 });
 const loading = computed(() => store.isBusy.value);
 const clarificationRequired = computed(() => {
@@ -141,14 +144,16 @@ async function handleDatabaseChange(event: Event) {
 }
 
 function statusLabel(status: QueryStatus) {
-  return ({
-    succeeded: "查询完成",
-    blocked: "已拦截",
-    failed: "执行失败",
-    running: "处理中",
-    needs_clarification: "需要澄清",
-    no_grounded_answer: "暂无可验证资料",
-  } as Record<QueryStatus, string>)[status];
+  return (
+    {
+      succeeded: "查询完成",
+      blocked: "已拦截",
+      failed: "执行失败",
+      running: "处理中",
+      needs_clarification: "需要澄清",
+      no_grounded_answer: "暂无可验证资料",
+    } as Record<QueryStatus, string>
+  )[status];
 }
 
 function statusClass(status: QueryStatus) {
@@ -167,10 +172,6 @@ function intentLabel(intent: QueryIntent) {
 function intentClass(intent: QueryIntent | string) {
   const normalizedIntent = intent === "data_query" ? "data_query" : "general_chat";
   return `intent-pill intent-pill--${normalizedIntent}`;
-}
-
-function resultColumns(result: QueryResult) {
-  return result.columns.map((label) => ({ label, prop: label }));
 }
 
 function resultRows(response: QueryResponse) {
@@ -298,42 +299,96 @@ async function scrollToBottom() {
 
             <div v-if="message.response?.intent === 'data_query'" class="response-card">
               <div class="response-card__header">
-                <div class="response-card__title"><Database :size="16" />{{ databaseId || "未选择数据库" }}</div>
-                <span :class="statusClass(message.response.status)"
-                  >{{ intentLabel(message.response.intent) }} ·
-                  {{ statusLabel(message.response.status) }}</span
-                >
+                <div class="response-card__title">
+                  <span class="response-card__eyebrow">DATA RESULT</span>
+                  <span class="response-card__database"
+                    ><Database :size="16" />{{ databaseId || "未选择数据库" }}</span
+                  >
+                </div>
+                <div class="response-card__summary">
+                  <span :class="statusClass(message.response.status)">
+                    {{ intentLabel(message.response.intent) }} ·
+                    {{ statusLabel(message.response.status) }}
+                  </span>
+                  <span class="response-card__row-count"
+                    >{{ message.response.result?.row_count ?? 0 }} 行</span
+                  >
+                </div>
               </div>
-              <el-table
-                v-if="message.response.result?.rows.length"
-                :data="resultRows(message.response)"
-                size="small"
-                stripe
-                class="result-table"
-              >
-                <el-table-column
-                  v-for="column in resultColumns(message.response.result)"
-                  :key="column.prop"
-                  v-bind="column"
-                  min-width="130"
-                />
-                <el-table-column label="引用" width="58" fixed="right">
-                  <template #default="scope">
-                    <button
-                      class="row-reference-button"
-                      type="button"
-                      title="引用此行"
-                      aria-label="引用此行"
-                      @click="referenceRow(message, scope.row.__rowIndex)"
-                    >
-                      <CornerDownRight :size="15" aria-hidden="true" />
-                    </button>
-                  </template>
-                </el-table-column>
-              </el-table>
+              <div v-if="message.response.result?.rows.length" class="result-table-wrap">
+                <el-table
+                  :data="resultRows(message.response)"
+                  size="small"
+                  stripe
+                  border
+                  fit
+                  table-layout="auto"
+                  class="result-table"
+                >
+                  <el-table-column
+                    v-for="column in resultColumns(message.response.result)"
+                    :key="column.prop"
+                    :label="column.label"
+                    :prop="column.prop"
+                    :min-width="column.longText ? 260 : 112"
+                    :class-name="column.longText ? 'result-column--long' : 'result-column--compact'"
+                  >
+                    <template #default="scope">
+                      <el-popover
+                        v-if="column.longText && resultCellText(scope.row[column.prop]) !== '—'"
+                        placement="top-start"
+                        :width="380"
+                        trigger="click"
+                        popper-class="result-cell-popover"
+                      >
+                        <div
+                          class="result-cell-detail message-markdown"
+                          v-html="renderMarkdown(resultCellText(scope.row[column.prop]))"
+                        />
+                        <template #reference>
+                          <span
+                            class="result-cell result-cell--markdown"
+                            role="button"
+                            tabindex="0"
+                            :title="`查看完整${column.label}`"
+                          >
+                            <span v-html="renderMarkdown(resultCellText(scope.row[column.prop]))" />
+                          </span>
+                        </template>
+                      </el-popover>
+                      <span
+                        v-else
+                        class="result-cell"
+                        :title="resultCellText(scope.row[column.prop])"
+                      >
+                        {{ resultCellText(scope.row[column.prop]) }}
+                      </span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="引用" width="58" fixed="right">
+                    <template #default="scope">
+                      <button
+                        class="row-reference-button"
+                        type="button"
+                        title="引用此行"
+                        aria-label="引用此行"
+                        @click="referenceRow(message, scope.row.__rowIndex)"
+                      >
+                        <CornerDownRight :size="15" aria-hidden="true" />
+                      </button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </div>
               <div v-else class="result-empty">没有返回数据行</div>
               <div class="response-card__footer">
-                <span>返回 {{ message.response.result?.row_count ?? 0 }} 行</span>
+                <span
+                  >{{ message.response.result?.columns.length ?? 0 }} 列 ·
+                  {{ message.response.result?.row_count ?? 0 }} 行</span
+                >
+                <span v-if="message.response.result?.truncated" class="result-truncated"
+                  >结果已截断</span
+                >
               </div>
             </div>
 
@@ -370,9 +425,15 @@ async function scrollToBottom() {
     <footer v-if="messages.length" class="composer-wrap">
       <div v-if="clarificationRequired && databases.length" class="clarification-control">
         <label for="clarification-database">选择数据库后重新提交</label>
-        <select id="clarification-database" :value="databaseId || ''" @change="handleDatabaseChange">
+        <select
+          id="clarification-database"
+          :value="databaseId || ''"
+          @change="handleDatabaseChange"
+        >
           <option value="" disabled>选择数据库</option>
-          <option v-for="database in databases" :key="database" :value="database">{{ database }}</option>
+          <option v-for="database in databases" :key="database" :value="database">
+            {{ database }}
+          </option>
         </select>
       </div>
       <form class="composer" @submit.prevent="handleSubmit">
@@ -792,9 +853,10 @@ async function scrollToBottom() {
 .response-card {
   margin-top: 14px;
   overflow: hidden;
-  border: 1px solid #e4e4e4;
-  border-radius: 9px;
+  border: 1px solid #dfe6e1;
+  border-radius: 12px;
   background: #fff;
+  box-shadow: 0 8px 24px rgba(28, 54, 38, 0.06);
   text-align: left;
 }
 .knowledge-hits {
@@ -874,15 +936,40 @@ async function scrollToBottom() {
   padding: 12px 14px;
 }
 .response-card__header {
-  border-bottom: 1px solid #ededed;
+  min-height: 58px;
+  border-bottom: 1px solid #e8ede9;
+  background: #fbfdfb;
 }
 .response-card__title {
-  display: flex;
-  gap: 7px;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.response-card__eyebrow {
+  color: #7b9182;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+.response-card__database {
+  display: inline-flex;
   align-items: center;
-  color: #555;
-  font-size: 12px;
-  font-weight: 700;
+  gap: 7px;
+  min-width: 0;
+  color: #34483b;
+  font-size: 13px;
+  font-weight: 750;
+}
+.response-card__summary {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 9px;
+}
+.response-card__row-count {
+  color: #849188;
+  font-size: 11px;
+  white-space: nowrap;
 }
 .status-pill {
   border-radius: 999px;
@@ -906,8 +993,122 @@ async function scrollToBottom() {
   color: #6356c8;
   background: #eeeaff;
 }
+.result-table-wrap {
+  overflow-x: auto;
+  border-bottom: 1px solid #e8ede9;
+}
 .result-table {
+  min-width: 640px;
   width: 100%;
+  color: #344239;
+  font-size: 12px;
+}
+.result-table :deep(.el-table__inner-wrapper::before) {
+  display: none;
+}
+.result-table :deep(.el-table__header-wrapper th) {
+  height: 38px;
+  border-bottom-color: #dde6df;
+  color: #728178;
+  background: #f4f8f5;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+}
+.result-table :deep(.el-table__body-wrapper td) {
+  height: 48px;
+  border-bottom-color: #edf1ee;
+  background: #fff;
+  vertical-align: middle;
+}
+.result-table :deep(.el-table__body tr.el-table__row--striped td) {
+  background: #fbfdfb;
+}
+.result-table :deep(.el-table__body tr:hover > td) {
+  background: #f1f8f3 !important;
+}
+.result-table :deep(.cell) {
+  overflow: hidden;
+  padding: 0 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.result-table :deep(.result-column--long .cell) {
+  white-space: normal;
+}
+.result-cell {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: #45574b;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.result-cell--markdown {
+  max-height: 3.9em;
+  color: #4b6253;
+  cursor: pointer;
+  line-height: 1.3;
+  outline: 0;
+  overflow: hidden;
+  text-align: left;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  display: -webkit-box;
+}
+.result-cell--markdown:hover,
+.result-cell--markdown:focus-visible {
+  color: #256b42;
+}
+.result-cell--markdown :deep(p),
+.result-cell--markdown :deep(ul),
+.result-cell--markdown :deep(ol),
+.result-cell--markdown :deep(h1),
+.result-cell--markdown :deep(h2),
+.result-cell--markdown :deep(h3),
+.result-cell--markdown :deep(pre) {
+  margin: 0;
+}
+.result-cell--markdown :deep(ul),
+.result-cell--markdown :deep(ol) {
+  padding-left: 16px;
+}
+.result-cell-detail {
+  max-height: 320px;
+  overflow-y: auto;
+  color: #3e4e43;
+  font-size: 12px;
+  line-height: 1.65;
+}
+.result-cell-detail :deep(p),
+.result-cell-detail :deep(ul),
+.result-cell-detail :deep(ol),
+.result-cell-detail :deep(pre),
+.result-cell-detail :deep(h1),
+.result-cell-detail :deep(h2),
+.result-cell-detail :deep(h3) {
+  margin: 0 0 9px;
+}
+.result-cell-detail :deep(p:last-child),
+.result-cell-detail :deep(ul:last-child),
+.result-cell-detail :deep(ol:last-child),
+.result-cell-detail :deep(pre:last-child),
+.result-cell-detail :deep(h1:last-child),
+.result-cell-detail :deep(h2:last-child),
+.result-cell-detail :deep(h3:last-child) {
+  margin-bottom: 0;
+}
+.result-cell-detail :deep(pre) {
+  overflow-x: auto;
+  border-radius: 6px;
+  padding: 8px;
+  background: #f2f6f3;
+  white-space: pre-wrap;
+}
+:global(.result-cell-popover) {
+  border-color: #d9e6dc !important;
+  box-shadow: 0 14px 36px rgba(24, 54, 36, 0.16) !important;
 }
 .row-reference-button {
   display: grid;
@@ -932,8 +1133,17 @@ async function scrollToBottom() {
   font-size: 13px;
 }
 .response-card__footer {
+  min-height: 38px;
   color: #8a8a8a;
   font-size: 12px;
+}
+.result-truncated {
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: #9a6e34;
+  background: #fff4df;
+  font-size: 10px;
+  font-weight: 700;
 }
 .composer-wrap {
   z-index: 2;
@@ -1181,6 +1391,24 @@ async function scrollToBottom() {
   }
   .message-answer {
     margin-top: 14px !important;
+  }
+  .response-card__header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .response-card__summary {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .result-table {
+    min-width: 560px;
+  }
+  .result-table :deep(.el-table__cell) {
+    padding-inline: 4px;
+  }
+  .result-table :deep(.cell) {
+    padding-inline: 8px;
   }
   .message-markdown :deep(p),
   .message-markdown :deep(ul),
