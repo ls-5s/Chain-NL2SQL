@@ -16,18 +16,32 @@ function sse(response: object) {
 test("keeps an unbound conversation through chat, clarification, database selection, and refresh", async ({ page }) => {
   const conversations = new Map<string, Conversation>();
   let nextConversation = 1;
+  let authenticated = false;
   const document = {
     id: "doc-1", filename: "销售指标口径.md", file_type: "MD", size_bytes: 24, category: "指标口径", status: "indexed",
     created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z", chunk_count: 1, summary: "销售额按订单明细汇总", failure_message: null,
     acl: { policy_type: "deny", role: null, user_id: null },
   };
+  conversations.set("conversation-1", {
+    id: "conversation-1",
+    title: "新聊天",
+    database_id: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    messages: [],
+  });
 
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
     const json = (body: object, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
-    if (path === "/api/v1/auth/session") return json({ authenticated: false, username: null, role: null });
-    if (path === "/api/v1/auth/login") return json({ authenticated: true, username: "admin", role: "super_admin" });
+    if (path === "/api/v1/auth/session") {
+      return json({ authenticated, username: authenticated ? "admin" : null, role: authenticated ? "super_admin" : null });
+    }
+    if (path === "/api/v1/auth/login") {
+      authenticated = true;
+      return json({ authenticated: true, username: "admin", role: "super_admin" });
+    }
     if (path === "/api/v1/databases") return json({ database_ids: ["demo"], databases: [] });
     if (path === "/api/v1/knowledge" && request.method() === "GET") return json([document]);
     if (path === "/api/v1/knowledge/doc-1/acl" && request.method() === "PATCH") {
@@ -79,12 +93,14 @@ test("keeps an unbound conversation through chat, clarification, database select
 
   await page.goto("/login");
   await page.getByLabel("用户名").fill("admin");
-  await page.getByLabel("密码").fill("123456");
+  await page.locator("#password").fill("123456");
   await page.getByRole("button", { name: "登录工作区" }).click();
   await expect(page).toHaveURL(/\/agent$/);
 
   const question = page.getByLabel("输入查询问题");
+  await expect(page.getByRole("button", { name: "发送查询" })).toBeDisabled();
   await question.fill("你好");
+  await expect(page.getByRole("button", { name: "发送查询" })).toBeEnabled();
   await page.getByRole("button", { name: "发送查询" }).click();
   await expect(page.getByText("你好，我可以协助分析数据。")).toBeVisible();
 
@@ -97,14 +113,14 @@ test("keeps an unbound conversation through chat, clarification, database select
   await question.fill("查询用户数量");
   await page.getByRole("button", { name: "发送查询" }).click();
   await expect(page.getByText("共有 3 位用户。")).toBeVisible();
-  await expect(page.getByText("用户数")).toBeVisible();
+  await expect(page.getByText("用户数", { exact: true })).toBeVisible();
 
   await page.reload();
   await expect(page.getByText("共有 3 位用户。")).toBeVisible();
 
   await page.getByRole("link", { name: "RAG 资料库" }).click();
   await expect(page.getByText("销售指标口径.md")).toBeVisible();
-  await page.getByLabel("访问范围").selectOption("all_authenticated");
+  await page.getByLabel("访问范围", { exact: true }).selectOption("all_authenticated");
   await page.getByRole("button", { name: "保存访问范围" }).click();
-  await expect(page.getByLabel("访问范围")).toHaveValue("all_authenticated");
+  await expect(page.getByLabel("访问范围", { exact: true })).toHaveValue("all_authenticated");
 });

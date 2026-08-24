@@ -6,8 +6,8 @@
 
 - Schema-RAG 是表名、字段名和数据库关系的唯一权威来源；
 - 知识库片段是不可信上下文，只能帮助模型理解业务语义；
-- 知识库检索失败、无命中或索引不可用时，不得阻断原有通用回答、Schema 检索和 SQL 查询流程；
-- 知识库是全局资源，不按 `database_id` 隔离；所有已登录用户可读，仅 `super_admin` 可写。
+- 知识库检索失败、无命中或索引不可用时，内部知识问题必须拒答；普通数据查询不依赖知识库，也不会把知识内容放入 SQL Prompt；
+- 知识库是全局资源，不按 `database_id` 隔离；文档 ACL 默认 `deny`，只有授权用户可检索，仅 `super_admin` 可上传、删除和修改 ACL。
 
 ## 2. 目录与职责
 
@@ -17,13 +17,14 @@ app/
 │   ├── __init__.py
 │   └── service.py             # 文档持久化、解析、异步索引、任务恢复和知识检索
 ├── api/
-│   └── routes.py              # 知识库 GET/POST/DELETE API 和角色权限边界
+│   └── routes.py              # 知识库 GET/POST/DELETE/ACL API 和角色权限边界
 ├── graph/
 │   ├── builder.py             # retrieve_knowledge 节点和 Graph 接线
 │   ├── state.py               # knowledge_hits、knowledge_context 和检索错误状态
-│   ├── general_answer_node.py # 通用回答中的知识背景注入
-│   ├── generation_node.py     # SQL 生成中的不可信业务背景注入
-│   └── repair_node.py         # SQL 修复中的知识背景复用
+│   ├── grounded_answer_node.py # 授权知识的引用约束回答
+│   ├── general_answer_node.py # 无知识要求时的通用回答
+│   ├── generation_node.py     # 仅使用授权 Schema 生成 SQL
+│   └── repair_node.py         # 复用固定 Schema 修复 SQL
 ├── schemas/
 │   ├── domain.py              # KnowledgeHit 等领域模型
 │   └── response.py            # QueryResponse 和 KnowledgeDocumentResponse
@@ -95,7 +96,7 @@ SQLite 数据库默认位于 `KNOWLEDGE_DATABASE_PATH`，包含：
 
 ### `GET /api/v1/knowledge`
 
-需要登录，返回按创建时间倒序排列的文档元数据列表。响应字段包括 `id`、`filename`、`file_type`、`size_bytes`、`category`、`status`、`created_at`、`updated_at`、`chunk_count`、`summary` 和 `failure_message`。
+需要登录，返回按创建时间倒序排列的文档元数据列表。响应字段包括 `id`、`filename`、`file_type`、`size_bytes`、`category`、`status`、`created_at`、`updated_at`、`chunk_count`、`summary`、`failure_message` 和 `acl`。
 
 ### `POST /api/v1/knowledge`
 
@@ -112,17 +113,21 @@ SQLite 数据库默认位于 `KNOWLEDGE_DATABASE_PATH`，包含：
 
 仅 `super_admin` 可调用。已索引或失败文档删除成功返回 `204`；文档不存在返回 `404`；文档正在处理返回 `409`。删除会移除数据库记录、索引记录和原文文件。
 
+### `PATCH /api/v1/knowledge/{document_id}/acl`
+
+仅 `super_admin` 可调用。请求体为 `{ "policy_type": "deny|all_authenticated|role|user", "role"?: "...", "user_id"?: "..." }`。`role` 策略必须提供角色，`user` 策略必须提供用户 ID；无效策略返回 `422`。ACL 变更立即影响后续检索。
+
 ## 6. 检索与 Graph 联动
 
-`build_query_graph()` 在配置知识库检索器时将 `retrieve_knowledge` 设为入口节点。节点使用已索引 chunk 做 BM25 检索，并将结果写入：
+`build_query_graph()` 在内部知识意图下进入 `retrieve_knowledge` 节点。节点使用已索引 chunk 做 BM25 检索，并将结果写入：
 
 - `knowledge_hits`：标题、分类、短摘要和相关度；
 - `knowledge_context`：限制总长度的提示词上下文；
 - `knowledge_retrieval_error`：检索失败时的受控错误标记。
 
-SQLite 支持 FTS5 时优先使用 `bm25()` 排序；不可用时退回确定性的 Python 关键词重叠检索。检索异常只写入错误状态并继续 `intent_gate`，不会阻断通用回答或 SQL 查询。
+SQLite 支持 FTS5 时优先使用 `bm25()` 排序；不可用时退回确定性的 Python 关键词重叠检索。检索异常写入受控错误状态；内部知识问题随后进入拒答分支，不会调用普通通用回答模型，也不会退回无 ACL 的知识库内容。
 
-知识上下文会进入通用回答、SQL 生成和 SQL 修复 Prompt，并明确标记为“不可信业务背景”。模型不得执行文档中的指令，不得从文档猜测 Schema 中不存在的表或字段。SQL 生成和校验仍只使用授权 Schema 和既有安全策略。
+知识上下文只进入 Grounded 回答 Prompt，并明确标记为“不可信业务背景”。模型回答必须包含授权 `document_id` 引用；缺少可靠命中或引用校验失败时返回 `NO_GROUNDED_ANSWER`。数据查询的 SQL 生成和修复 Prompt 不包含知识库内容，只使用授权 Schema 和既有安全策略。
 
 公共 `QueryResponse` 增加可选 `knowledge_hits`，默认空列表，因此历史会话响应仍可反序列化。SSE 在 `retrieve_knowledge` 进度中报告命中数量和知识检索可用性；会话持久化保存新增进度和最终响应字段。
 
@@ -130,7 +135,8 @@ SQLite 支持 FTS5 时优先使用 `bm25()` 排序；不可用时退回确定性
 
 [`RagView.vue`](../web/src/views/RagView.vue) 提供文档总数、已索引数、处理中数量和失败数量统计，并支持文件名/分类/摘要搜索、分类筛选、上传弹窗、失败原因、刷新和删除确认。
 
-- 管理员显示上传和删除控制；普通成员只读；
+- 管理员显示上传、删除和 ACL 控制；普通成员只读；
+- 管理员可为每份文档设置禁止、全体已登录用户、指定角色或指定用户 ACL；保存失败会显示文档级错误；
 - `uploading` 或 `parsing` 文档每 2 秒刷新一次；组件卸载时清理定时器；
 - 客户端先做扩展名和 20 MiB 校验，后端仍执行完整安全校验；
 - [`AgentView.vue`](../web/src/views/AgentView.vue) 通过折叠区域展示知识命中标题、分类和摘要。
@@ -150,7 +156,7 @@ KNOWLEDGE_CHUNK_OVERLAP=120
 
 ## 9. 测试与验收
 
-后端 [`tests/unit/test_knowledge.py`](../tests/unit/test_knowledge.py) 覆盖 Markdown 上传、异步索引、BM25 检索、非法扩展名、超大文件、PDF 签名和处理中删除保护。前端 [`web/src/tests/ragView.spec.ts`](../web/src/tests/ragView.spec.ts) 覆盖空态、成员只读、管理员上传和轮询收敛。
+后端 [`tests/unit/test_knowledge.py`](../tests/unit/test_knowledge.py) 和 [`tests/unit/test_knowledge_v2.py`](../tests/unit/test_knowledge_v2.py) 覆盖 Markdown 上传、异步索引、BM25 检索、默认拒绝、role/user ACL、撤权、重建失败保留旧索引和 Grounded 引用拒答。前端 [`web/src/tests/ragView.spec.ts`](../web/src/tests/ragView.spec.ts) 覆盖空态、成员只读、管理员上传、轮询收敛和 ACL 保存。
 
 推荐执行：
 
@@ -162,4 +168,4 @@ pnpm test
 pnpm build
 ```
 
-E2E 流程通过管理员 API 上传 `销售指标口径.md`，轮询直到 `indexed`，执行查询并断言响应中存在“知识命中”和文件名。测试环境应使用确定性的模型或后端替身，不能依赖生产模型和真实外部服务。
+Playwright 当前覆盖登录、无数据库会话、普通回答、澄清、数据库选择、数据结果、刷新恢复和 ACL 保存；后端 Graph/SQLite/FakeLLM 覆盖真实节点链路。测试环境使用确定性替身，不依赖生产模型和真实外部服务。完整结果见[Agent完整流程测试说明](Agent完整流程测试说明.md)。

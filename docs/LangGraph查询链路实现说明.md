@@ -5,9 +5,10 @@
 当前 `POST /api/v1/query` 接入一个可运行的 LangGraph 工作流。请求先经过数据库访问策略和意图闸门，再按意图选择后续分支：
 
 - `data_query`：明确需要本地业务数据，进入 Schema 读取、SQL 生成、安全校验和只读执行。
-- `general_chat`：不需要本地数据库，例如问候、常识、写作或代码辅助，交给通用问答节点。
+- `general_chat`：不需要本地数据库，例如问候、常识、写作或代码辅助，交给通用问答节点；
+- `clarify`：意图不明确、字段缺失或数据库未选择时，返回澄清要求，不访问数据库。
 
-意图闸门采用“规则优先 + LLM 兜底”：高置信度、数据库无关的规则直接分类；规则无法安全判断时才调用 LLM。LLM 必须返回包含 `intent`、`confidence`、`reason` 的严格 JSON，默认置信度阈值为 `INTENT_CONFIDENCE_THRESHOLD=0.75`。非法输出或低于阈值时统一进入 `general_chat`，因此不会访问 Schema 或数据库。
+意图闸门采用“规则优先 + LLM 兜底”：高置信度、数据库无关的规则直接分类；规则无法安全判断时才调用 LLM。LLM 必须返回包含 `intent`、`confidence`、`reason` 的严格 JSON，默认置信度阈值为 `INTENT_CONFIDENCE_THRESHOLD=0.75`。非法输出或低于阈值时进入 `clarify`，因此不会访问 Schema 或数据库。
 
 只有最终意图为 `data_query` 时才允许进入数据查询分支。真实模型需要在 `.env` 中配置 OpenAI 兼容服务：
 
@@ -156,6 +157,7 @@ flowchart TD
     RULE -- 可直接判断 --> CLASSIFY
     RULE -- 无法判断 --> INTENTLLM --> CLASSIFY
     CLASSIFY -- general_chat --> GENERAL
+    CLASSIFY -- clarify --> CLARIFY
     CLASSIFY -- data_query --> RETRIEVE
     GENERAL --> FINAL
 
@@ -306,13 +308,13 @@ intent_gate
 
 ```json
 {
-  "intent": "data_query|general_chat",
+  "intent": "data_query|general_chat|clarify",
   "confidence": 0.0,
   "reason": "简短判断理由"
 }
 ```
 
-闸门会把来源记录为 `rule` 或 `llm`，并保留置信度和理由。LLM 输出必须是合法 JSON、只包含上述三个字段、标签属于白名单、置信度在 `[0, 1]`；否则或置信度低于阈值时返回 `general_chat`，并设置 `intent_classification_valid=false`。模型调用异常由 API 流转换为安全的 `error` SSE，不会降级为数据库查询。
+闸门会把来源记录为 `rule` 或 `llm`，并保留置信度和理由。LLM 输出必须是合法 JSON、只包含上述三个字段、标签属于白名单、置信度在 `[0, 1]`；否则或置信度低于阈值时返回 `clarify`，并设置 `intent_classification_valid=false`。模型调用异常由 API 流转换为安全的 `error` SSE，不会降级为数据库查询。
 
 | 用户问题 | 意图 | 后续处理 |
 | --- | --- | --- |
@@ -320,8 +322,8 @@ intent_gate
 | `上个月订单总额是多少` | `data_query` | 读取 Schema 并执行只读查询 |
 | `你好` | `general_chat` | 通用模型回答，不访问数据库 |
 | `帮我写一封邮件` | `general_chat` | 通用模型生成文本 |
-| `帮我看看数据` | `general_chat` | 交由通用模型回答，不访问数据库 |
-| `订单情况怎么样？` | `general_chat` | 交由通用模型回答，不访问数据库 |
+| `帮我看看数据` | `clarify` | 返回缺失字段，不访问数据库 |
+| `订单情况怎么样？` | `clarify` | 返回缺失指标或时间范围，不访问数据库 |
 
 ### 4.2 数据查询链路
 
@@ -453,7 +455,7 @@ data: {"intent":"general_chat","status":"succeeded","result":null,"generated_sql
 | 数据库不在访问策略中 | HTTP `403` |
 | 数据库未注册、已禁用或无可用适配器 | HTTP `404` |
 | 模型密钥或模型名称缺失 | HTTP `503` |
-| 意图分类 JSON 无效或置信度不足 | `general_chat`，不访问数据库 |
+| 意图分类 JSON 无效或置信度不足 | `clarify`，不访问数据库 |
 | 流内模型调用失败 | SSE `error`，返回安全错误说明 |
 | Schema 读取或 SQL 执行异常 | SSE `error` 或受控失败状态；不泄漏连接信息 |
 | SQL 安全策略拒绝 | 状态为 `blocked`，通过 `complete` 返回受控结果 |
@@ -512,7 +514,7 @@ SQL 执行前还会进行单语句、只读、表/字段白名单和 AST 检查�
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-当前后端测试基线为 **66 passed**；前端 Vitest 基线为 **17 passed**。前端生产构建命令为：
+当前后端测试基线为 **103 passed**；前端 Vitest 基线为 **21 passed**，Playwright 完整流程为 **1 passed**。前端生产构建命令为：
 
 ```powershell
 node node_modules/vite/bin/vite.js build
