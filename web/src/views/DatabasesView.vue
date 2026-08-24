@@ -5,7 +5,6 @@ import {
   Database as DatabaseIcon,
   LoaderCircle,
   Pencil,
-  Plus,
   RefreshCw,
   ShieldCheck,
   Trash2,
@@ -327,7 +326,7 @@ onMounted(() => void loadDatabases());
               selectedDatabase.enabled ? 'status-badge--ready' : 'status-badge--interactive',
             ]"
             type="button"
-            :disabled="!isAdmin || selectedDatabase.enabled || activatingId !== ''"
+            :disabled="!isAdmin || selectedDatabase.enabled || activatingId !== '' || batchUpdating"
             :title="
               selectedDatabase.enabled
                 ? '当前 Agent 正在使用此数据库'
@@ -368,7 +367,9 @@ onMounted(() => void loadDatabases());
               <h3>Agent 表权限</h3>
               <p>只有开启的表会进入 Agent 的 Schema 和查询权限。</p>
             </div>
-            <span class="table-heading__count">{{ enabledTableCount }} / {{ selectedDatabase.tables.length }} 已授权</span>
+            <span class="table-heading__count"
+              >{{ enabledTableCount }} / {{ selectedDatabase.tables.length }} 已授权</span
+            >
           </div>
 
           <div class="table-controls">
@@ -462,6 +463,7 @@ onMounted(() => void loadDatabases());
               type="button"
               title="编辑数据库"
               aria-label="编辑数据库"
+              :disabled="batchUpdating"
               @click="openEdit(selectedDatabase)"
             >
               <Pencil :size="16" />
@@ -472,6 +474,7 @@ onMounted(() => void loadDatabases());
               type="button"
               title="删除数据库"
               aria-label="删除数据库"
+              :disabled="batchUpdating"
               @click="removeDatabase(selectedDatabase)"
             >
               <Trash2 :size="16" />
@@ -1362,6 +1365,140 @@ fieldset,
 .dialect-switch button.active {
   color: #205e39;
   background: #fffefa;
+}
+
+.database-detail {
+  min-height: 0;
+}
+
+.table-heading__count {
+  flex: 0 0 auto;
+}
+
+.table-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0 0 12px;
+}
+
+.table-filter {
+  display: inline-flex;
+  gap: 2px;
+  border: 1px solid #d9e5db;
+  border-radius: 7px;
+  padding: 3px;
+  background: #f1f6f1;
+}
+
+.table-filter button {
+  min-height: 28px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 0 10px;
+  color: #738379;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.table-filter button:hover:not(:disabled),
+.table-filter button.active {
+  border-color: #c7dfcb;
+  color: #28633d;
+  background: #fffefa;
+  box-shadow: 0 1px 3px rgba(32, 75, 44, 0.08);
+}
+
+.table-filter button:disabled,
+.text-action:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.table-batch-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.text-action {
+  min-height: 30px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0 8px;
+  color: #39704b;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.text-action:hover:not(:disabled) {
+  border-color: #cbe0cf;
+  background: #f0f8f1;
+}
+
+.text-action--muted {
+  color: #7d8980;
+}
+
+.batch-message {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  color: #5c7c65;
+  font-size: 11px;
+}
+
+.batch-message svg {
+  color: #4f9564;
+}
+
+.table-row__copy,
+.table-row__control {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.table-row__copy {
+  display: grid;
+  gap: 3px;
+}
+
+.table-row__control {
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
+.table-row__state {
+  min-width: 42px;
+  color: #849087;
+  font-size: 10px;
+  text-align: right;
+}
+
+.table-row--enabled .table-row__state {
+  color: #4c8a5d;
+}
+
+.table-row input {
+  margin: 0;
+}
+
+@media (max-width: 700px) {
+  .table-controls {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .table-batch-actions {
+    align-self: flex-end;
+  }
 }
 
 @media (max-width: 1100px) {
