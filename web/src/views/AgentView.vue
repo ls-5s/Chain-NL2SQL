@@ -185,6 +185,12 @@ function resultRows(response: QueryResponse) {
   );
 }
 
+function isSummaryQuestion(messageIndex: number) {
+  const previous = messages.value[messageIndex - 1];
+  if (!previous || previous.role !== "user") return false;
+  return /总结|摘要|概括|分别介绍|每篇|各篇/.test(previous.content);
+}
+
 async function referenceRow(message: { turn_id: string }, rowIndex: number) {
   if (!store.activeConversationId.value || !message.turn_id) return;
   try {
@@ -257,7 +263,7 @@ async function scrollToBottom() {
 
       <div v-else class="message-list">
         <article
-          v-for="message in messages"
+          v-for="(message, messageIndex) in messages"
           :key="message.id"
           class="message-row"
           :class="`message-row--${message.role}`"
@@ -297,7 +303,10 @@ async function scrollToBottom() {
               {{ intentLabel(message.response.intent) }}
             </span>
 
-            <div v-if="message.response?.intent === 'data_query'" class="response-card">
+            <div
+              v-if="message.response?.intent === 'data_query' && message.response.result && !isSummaryQuestion(messageIndex)"
+              class="response-card"
+            >
               <div class="response-card__header">
                 <div class="response-card__title">
                   <span class="response-card__eyebrow">DATA RESULT</span>

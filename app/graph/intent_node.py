@@ -83,7 +83,10 @@ def _is_database_follow_up(question: str, conversation_context: str) -> bool:
         return False
     has_follow_up_language = any(
         marker in normalized
-        for marker in ("推荐", "一篇", "一个", "这篇", "这类", "这些", "刚才", "继续", "数据库里面", "数据库里的")
+        for marker in (
+            "推荐", "一篇", "一个", "这篇", "这类", "这些", "刚才", "继续",
+            "数据库里面", "数据库里的", "有哪些内容", "有那些内容", "讲了什么", "正文", "详细内容",
+        )
     )
     has_article_result = any(marker in conversation_context.lower() for marker in ("articles", "文章", "generated_sql"))
     return has_follow_up_language and has_article_result

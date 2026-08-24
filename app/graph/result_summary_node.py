@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+from html import unescape
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -32,9 +34,9 @@ def make_result_summary_node(
         if state.get("status") != QueryStatus.SUCCEEDED or result is None or not enabled:
             return base
         try:
-            result_json = _serialize_result(result)
-            if max_chars <= 0 or len(result_json) > max_chars:
+            if max_chars <= 0:
                 return base
+            result_json = _serialize_result(result, max_chars)
             response = llm_client.generate(
                 prompt_template.invoke({
                     "question": state["question"],
@@ -59,7 +61,7 @@ def make_result_summary_node(
 
 
 def _fallback(result: QueryResult | None, question: str = "") -> str:
-    if result and result.rows and any(marker in question for marker in ("推荐", "一篇", "一个")):
+    if result and result.rows and "推荐" in question and not _is_summary_request(question):
         title_index = next(
             (index for index, column in enumerate(result.columns) if any(marker in column.lower() for marker in ("title", "name", "标题", "名称"))),
             None,
@@ -68,19 +70,66 @@ def _fallback(result: QueryResult | None, question: str = "") -> str:
             title = str(result.rows[0][title_index]).strip()
             if title:
                 return f"推荐这篇：{title}。"
+    if result and result.rows and _is_summary_request(question):
+        title_index = _find_column(result, ("title", "name", "标题", "名称"))
+        content_index = _find_column(result, ("content", "description", "summary", "excerpt", "正文", "内容", "摘要"))
+        if title_index is not None:
+            lines = []
+            for row in result.rows:
+                title = _clean_text(row[title_index])
+                if not title:
+                    continue
+                excerpt = _clean_text(row[content_index])[:140] if content_index is not None else ""
+                lines.append(f"- {title}" + (f"：{excerpt}…" if excerpt else ""))
+            if lines:
+                return "各篇文章摘要：\n" + "\n".join(lines)
     count = result.row_count if result else 0
     suffix = "（结果已按安全策略截断）" if result and result.truncated else ""
     return f"查询完成，共返回 {count} 行结果。{suffix}"
 
 
-def _serialize_result(result: QueryResult) -> str:
+def _serialize_result(result: QueryResult, max_chars: int | None = None) -> str:
     payload = {
         "columns": result.columns,
         "rows": result.rows,
         "row_count": result.row_count,
         "truncated": result.truncated,
     }
-    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=_json_default)
+    serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=_json_default)
+    if max_chars is None or len(serialized) <= max_chars:
+        return serialized
+    # Keep every row represented, but shorten long article/body cells so the
+    # summarizer can still describe all returned records within its budget.
+    for cell_chars in (700, 400, 220, 100, 40, 0):
+        compact_rows = [[_clean_text(value)[:cell_chars] for value in row] for row in result.rows]
+        compact = {**payload, "rows": compact_rows}
+        serialized = json.dumps(compact, ensure_ascii=False, separators=(",", ":"), default=_json_default)
+        if len(serialized) <= max_chars:
+            return serialized
+    # The column names and row count are still valid JSON even for an
+    # unusually wide result set that cannot fit the configured budget.
+    return json.dumps(
+        {"columns": result.columns, "rows": [], "row_count": result.row_count, "truncated": True},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _is_summary_request(question: str) -> bool:
+    return any(marker in question for marker in ("总结", "摘要", "概括", "分别介绍", "每篇", "各篇"))
+
+
+def _find_column(result: QueryResult, markers: tuple[str, ...]) -> int | None:
+    return next(
+        (index for index, column in enumerate(result.columns) if any(marker in column.lower() for marker in markers)),
+        None,
+    )
+
+
+def _clean_text(value: Any) -> str:
+    text = "" if value is None else str(value)
+    text = unescape(re.sub(r"<[^>]*>", " ", text))
+    return " ".join(text.split())
 
 
 def _json_default(value: Any) -> str:

@@ -31,6 +31,10 @@ class InvalidResultReferenceError(ValueError):
     pass
 
 
+def _is_summary_question(question: str) -> bool:
+    return any(marker in question for marker in ("总结", "摘要", "概括", "分别介绍", "每篇", "各篇"))
+
+
 class ConversationRepository:
     """All conversation data is local to one application SQLite database."""
 
@@ -217,8 +221,11 @@ class ConversationRepository:
                 (conversation_id,),
             ).fetchall()
         messages = []
+        questions_by_turn = {row["turn_id"]: row["content"] for row in rows if row["role"] == "user"}
         for row in rows:
             response = QueryResponse.model_validate_json(row["response_json"]) if row["response_json"] else None
+            if response and row["role"] == "assistant" and _is_summary_question(questions_by_turn.get(row["turn_id"], "")):
+                response = response.model_copy(update={"result": None})
             messages.append({
                 "id": row["id"], "turn_id": row["turn_id"], "role": row["role"], "content": row["content"],
                 "status": row["status"], "response": response, "progress": json.loads(row["progress_json"]),
@@ -229,7 +236,6 @@ class ConversationRepository:
         result["message_count"] = len(messages)
         result["messages"] = messages
         return result
-
     def delete_conversation(self, user_id: str, conversation_id: str) -> None:
         with self._connection() as connection:
             cursor = connection.execute("DELETE FROM conversations WHERE id = ? AND user_id = ?", (conversation_id, user_id))
