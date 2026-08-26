@@ -10,7 +10,7 @@ Schema-RAG 不等同于知识库 RAG：
 - 知识库 RAG 面向业务规则、指标口径和数据字典等资料；
 - Schema-RAG 的结果必须受到表级、字段级访问策略限制，不能把未授权结构发送给模型。
 
-当前实现覆盖本地 SQLite Demo。MySQL、多数据库注册和生产级索引运维仍属于后续扩展。
+当前实现覆盖 SQLite Demo 以及经 `DatabaseRegistry` 登记、连接测试和表权限授权的 MySQL 数据库。Schema-RAG 通过统一的 `DatabaseExecutor` 接口读取两类数据库的 Schema；生产级索引监控和完整 CSpider/Spider 消融评测仍属于后续增强。
 
 ## 2. 目录与职责
 
@@ -50,6 +50,8 @@ app/
 ├── db/
 │   ├── base.py               # DatabaseExecutor 协议
 │   ├── sqlite_adapter.py     # Demo SQLite 只读适配器
+│   ├── mysql_adapter.py      # MySQL Schema 读取和只读执行
+│   ├── registry.py           # 数据库登记和表级 Agent 权限
 │   └── security_policy.py    # SQL AST 只读和访问策略校验
 └── tool/
     └── database_query.py     # 可独立创建的数据库查询工具，当前 Graph 不自动调用
@@ -63,10 +65,11 @@ tests/
 web/src/
 ├── api/client.ts             # 后端 HTTP/SSE 客户端
 ├── types/api.ts              # 前端 API 和 SSE 类型
-└── views/QueryView.vue       # 查询聊天界面和流式进度展示
+├── views/AgentView.vue       # 查询聊天界面和流式进度展示
+└── views/DatabasesView.vue   # 数据库登记、连接测试和表权限
 ```
 
-该目录说明描述当前代码职责。Schema-RAG 的 `index_manager.py`、BM25、Chroma、Hybrid 和 Reranker 已接入查询 Graph；`repair_node.py` 已接入有限错误类别修复，MySQL 适配器和独立数据库工具仍属于预留能力。
+该目录说明描述当前代码职责。Schema-RAG 的 `index_manager.py`、BM25、Chroma、Hybrid 和 Reranker 已接入查询 Graph；`repair_node.py` 已接入有限错误类别修复；MySQL 适配器、数据库注册、表级 Agent 权限和数据库管理页面均已实现。`database_query.py` 是可独立创建的只读工具，但当前 Graph 不自动调用。
 
 ## 3. 完整数据流
 
@@ -144,7 +147,7 @@ FOREIGN KEYS none
 索引目录为：
 
 ```text
-data/schema_metadata/{database_id}/{schema_version}/{scope_hash}/
+data/schema_metadata_runtime/{database_id}/{schema_version}/{scope_hash}/
 ├── manifest.json
 ├── bm25.json
 └── vector/
@@ -226,7 +229,7 @@ SSE 的 `retrieve_schema` 进度事件会报告检索模式、召回数量和已
 ```dotenv
 SCHEMA_RETRIEVAL_MODE=hybrid
 SCHEMA_TOP_K=5
-SCHEMA_INDEX_ROOT=data/schema_metadata
+SCHEMA_INDEX_ROOT=data/schema_metadata_runtime
 SCHEMA_FALLBACK_MODE=bm25
 SCHEMA_EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5
 SCHEMA_RERANKER_MODEL=BAAI/bge-reranker-base
@@ -251,10 +254,9 @@ SCHEMA_RERANKER_MODEL=BAAI/bge-reranker-base
 
 当前未覆盖或仍属后续能力：
 
-- MySQL Schema 读取和数据库注册表；
 - 多轮会话中的跨请求 Schema 权限继承；
 - 独立索引构建 CLI 和生产级索引监控；
 - 更复杂的领域级 SQL 自动修复和多轮修复策略；
 - CSpider/Spider 的完整 RAG 消融评测。
 
-最后一次本地验证：`53 passed`。
+推荐使用仓库测试命令验证：`pytest tests/unit/test_schema_rag.py -q`。测试使用 fake embedding/reranker，不依赖远程模型；完整后端结果取决于本地依赖和测试环境。

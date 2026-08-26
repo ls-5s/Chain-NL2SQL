@@ -2,11 +2,13 @@
 
 ## 1. 实现概览
 
-当前 `POST /api/v1/query` 接入一个可运行的 LangGraph 工作流。请求先经过数据库访问策略和意图闸门，再按意图选择后续分支：
+当前 `POST /api/v1/query` 以及会话查询接口接入同一套可运行的 LangGraph 工作流。请求先经过数据库访问策略和意图闸门，再按意图选择后续分支：
 
 - `data_query`：明确需要本地业务数据，进入 Schema 读取、SQL 生成、安全校验和只读执行。
 - `general_chat`：不需要本地数据库，例如问候、常识、写作或代码辅助，交给通用问答节点；
 - `clarify`：意图不明确、字段缺失或数据库未选择时，返回澄清要求，不访问数据库。
+
+当通用问题的 `knowledge_policy=required` 时，Graph 会进入 `retrieve_knowledge -> grounded_answer`，只使用当前用户有权访问的业务知识片段回答，并返回受控来源；普通通用回答和数据查询不会无条件读取知识库。知识库检索异常不会把未授权内容送入模型，普通数据查询仍可继续进入 Schema-RAG。
 
 意图闸门采用“规则优先 + LLM 兜底”：高置信度、数据库无关的规则直接分类；规则无法安全判断时才调用 LLM。LLM 必须返回包含 `intent`、`confidence`、`reason` 的严格 JSON，默认置信度阈值为 `INTENT_CONFIDENCE_THRESHOLD=0.75`。非法输出或低于阈值时进入 `clarify`，因此不会访问 Schema 或数据库。
 
@@ -35,7 +37,7 @@ app/
 │   ├── authorization.py      # 数据库、表和字段访问策略模型
 │   └── response_mapper.py    # Graph State 到安全响应模型的映射
 ├── auth/
-│   └── repository.py         # 单账号登录、会话 Cookie 和账号状态持久化
+│   └── repository.py         # 账号、角色、会话 Cookie 和成员状态持久化
 ├── conversations/
 │   └── repository.py         # 分析会话、消息、SSE 进度和结果快照持久化
 ├── config/
@@ -287,11 +289,13 @@ intent_gate
   │                  -> result_guard -> summarize_result -> finalize -> END
   │                  -> repair_sql（可修复错误且未达轮次） -> validate_sql
   ├─ general_chat   -> general_answer -> finalize -> END
+  ├─ grounded_chat  -> retrieve_knowledge -> grounded_answer -> finalize -> END
+  └─ clarify        -> clarification_answer -> finalize -> END
 ```
 
 | 节点 | 实现 | 作用 | 数据库/Schema 访问 |
 | --- | --- | --- | --- |
-| `intent_gate` | [`intent_node.py`](../app/graph/intent_node.py) | 规则优先，必要时调用无 Schema Prompt 将问题分类为两种意图 | 否 |
+| `intent_gate` | [`intent_node.py`](../app/graph/intent_node.py) | 规则优先，必要时调用无 Schema Prompt 将问题分类为 `data_query`、`general_chat` 或 `clarify` | 否 |
 | `retrieve_schema` | [`index_manager.py`](../app/rag/index_manager.py) 中的 `SchemaIndexManager` | 按问题检索允许访问的 Schema，返回版本、模式和召回摘要 | 是，仅 `data_query` |
 | `generate_sql` | [`generation_node.py`](../app/graph/generation_node.py) | 基于固定 Schema 生成单条只读 SQL | 否 |
 | `validate_sql` | [`validation_node.py`](../app/graph/validation_node.py) | 执行 SQL AST、安全、表和字段白名单校验 | 否 |
@@ -299,6 +303,9 @@ intent_gate
 | `result_guard` | [`result_guard_node.py`](../app/graph/result_guard_node.py) | 不调用 LLM，复核结果形状、行数上限、SQL 投影与字段权限；对直接列、别名和表达式统一脱敏，无法证明安全时失败关闭 | 否；读取已执行 SQL 和结果 |
 | `summarize_result` | [`result_summary_node.py`](../app/graph/result_summary_node.py) | 仅把安全复核后的结果交给 LLM 生成 `final_answer`；模型失败时使用确定性回答 | 否 |
 | `general_answer` | [`general_answer_node.py`](../app/graph/general_answer_node.py) | 回答无需本地数据库的普通问题 | 否 |
+| `retrieve_knowledge` | [`builder.py`](../app/graph/builder.py) | 按当前用户 ACL 检索业务知识片段，写入 `knowledge_hits` 和 `knowledge_context`；失败时保留受控错误 | 仅知识策略要求时 |
+| `grounded_answer` | [`grounded_answer_node.py`](../app/graph/grounded_answer_node.py) | 基于授权知识片段生成带来源约束的业务回答；无可靠命中时拒答 | 否 |
+| `clarification_answer` | [`clarification_node.py`](../app/graph/clarification_node.py) | 对意图不明确、缺少数据库或查询条件的问题生成澄清响应 | 否 |
 | `repair_sql` | [`repair_node.py`](../app/graph/repair_node.py) | 对有限数据库错误复用固定 Schema 生成修复 SQL，并受最大轮次限制 | 否 |
 | `finalize` | [`finalize_node.py`](../app/graph/finalize_node.py) | 整理回答、查询结果或受控错误 | 否 |
 
@@ -502,9 +509,9 @@ SQL 执行前还会进行单语句、只读、表/字段白名单和 AST 检查�
 
 - 明确数据查询进入 Schema、SQL 生成、校验和执行；
 - 明确通用问题只调用分类和通用回答，不访问 Schema 或数据库；
-- 信息不足的数据问题进入通用回答，不访问数据库；
+- 信息不足或置信度不足的问题进入澄清回答，不访问数据库；
 - 规则命中时不调用 LLM；
-- 非法 JSON、未知标签、字段缺失和低置信度返回通用回答；
+- 非法 JSON、未知标签、字段缺失和低置信度返回澄清回答；
 - SSE 数据、通用回答和错误事件顺序及内容；
 - 50 条评测集的样例数量、类别计数、指标和报告可序列化。
 
@@ -514,13 +521,13 @@ SQL 执行前还会进行单语句、只读、表/字段白名单和 AST 检查�
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-当前后端测试基线为 **103 passed**；前端 Vitest 基线为 **21 passed**，Playwright 完整流程为 **1 passed**。前端生产构建命令为：
+前端生产构建命令为：
 
 ```powershell
-node node_modules/vite/bin/vite.js build
+pnpm build
 ```
 
-前端构建需在本地依赖完整时单独验证；本说明不把未实际运行的构建结果标记为通过。
+推荐在本地依赖完整时执行 `pytest`、`pnpm test`、`pnpm build` 和 `pnpm e2e`。测试数量会随用例演进变化，因此本文不固定记录历史通过数量。
 
 ## 11. 当前边界与后续工作
 

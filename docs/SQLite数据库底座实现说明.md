@@ -2,7 +2,7 @@
 
 ## 1. 模块定位
 
-SQLite 数据库底座是 Chain-NL2SQL P0 阶段的安全执行边界，为后续 LangGraph 提供稳定的 `DatabaseExecutor` 接口。
+SQLite 数据库底座是 Chain-NL2SQL 的本地安全执行边界，为 LangGraph 提供稳定的 `DatabaseExecutor` 接口。MySQL 由并列的 `MySQLAdapter` 实现相同抽象；本文聚焦 SQLite 的文件连接、Schema 读取和执行细节。
 
 本模块负责：
 
@@ -13,7 +13,7 @@ SQLite 数据库底座是 Chain-NL2SQL P0 阶段的安全执行边界，为后�
 - 控制查询超时、连接生命周期和结果行数；
 - 对敏感字段脱敏并返回统一结果结构。
 
-本阶段不负责 LangGraph 编排、LLM 调用、FastAPI 查询流程、MySQL 适配和向量检索。
+本模块不负责 LangGraph 编排、LLM 调用、FastAPI 查询流程、Schema-RAG 召回或数据库注册；MySQL 的驱动差异由 `app/db/mysql_adapter.py` 负责，安全策略和结果边界由两类适配器共同复用。
 
 ## 2. 目录与职责
 
@@ -26,7 +26,9 @@ app/
 │   ├── result_formatter.py    # 第一层行数限制、字段脱敏和结果标准化
 │   ├── result_guard.py         # Graph 第二层结果形状、投影和权限复核
 │   ├── security_policy.py     # sqlglot AST 只读和访问策略校验
-│   └── sqlite_adapter.py      # SQLite 适配器和执行生命周期
+│   ├── sqlite_adapter.py      # SQLite 适配器和执行生命周期
+│   ├── mysql_adapter.py       # MySQL 适配器（并列实现 DatabaseExecutor）
+│   └── registry.py            # 数据库登记和表级 Agent 权限
 └── rag/
     ├── introspector.py        # 读取 SQLite 表、字段、主键和外键
     ├── normalizer.py          # 标准化元数据模型
@@ -208,6 +210,8 @@ FOREIGN KEYS none
 - Schema 未变化时版本保持不变；
 - 增加、删除或修改表字段后版本发生变化；
 - Graph 后续首次检索后固定该版本，修复循环不得偷偷替换 Schema 上下文。
+
+MySQL 适配器通过 INFORMATION_SCHEMA 读取对应元数据，数据库方言、连接超时和参数占位符由适配器处理；Graph、Schema-RAG 和安全策略只依赖 `DatabaseExecutor` 抽象，不直接依赖驱动。
 
 ## 9. 结果格式
 

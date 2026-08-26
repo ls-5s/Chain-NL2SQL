@@ -2,12 +2,14 @@
 
 ## 1. 功能定位
 
-业务知识库 RAG 为 NL2SQL Agent 提供指标口径、业务规则和数据字典等业务背景。它与 Schema-RAG 的职责严格分离：
+业务知识库 RAG 是当前已接入的全局业务资料能力，为 Agent 提供指标口径、业务规则和数据字典等业务背景。它与 Schema-RAG 的职责严格分离：
 
 - Schema-RAG 是表名、字段名和数据库关系的唯一权威来源；
 - 知识库片段是不可信上下文，只能帮助模型理解业务语义；
 - 知识库检索失败、无命中或索引不可用时，内部知识问题必须拒答；普通数据查询不依赖知识库，也不会把知识内容放入 SQL Prompt；
 - 知识库是全局资源，不按 `database_id` 隔离；文档 ACL 默认 `deny`，只有授权用户可检索，仅 `super_admin` 可上传、删除和修改 ACL。
+
+当前后端接口为 `GET/POST/DELETE /api/v1/knowledge` 和 `PATCH /api/v1/knowledge/{document_id}/acl`；前端入口为 `RagView.vue`，查询结果中的 `knowledge_hits` 由 `AgentView.vue` 折叠展示。知识库不能替代数据库 Schema，也不能改变 SQL 安全策略或表字段权限。
 
 ## 2. 目录与职责
 
@@ -127,7 +129,7 @@ SQLite 数据库默认位于 `KNOWLEDGE_DATABASE_PATH`，包含：
 
 SQLite 支持 FTS5 时优先使用 `bm25()` 排序；不可用时退回确定性的 Python 关键词重叠检索。检索异常写入受控错误状态；内部知识问题随后进入拒答分支，不会调用普通通用回答模型，也不会退回无 ACL 的知识库内容。
 
-知识上下文只进入 Grounded 回答 Prompt，并明确标记为“不可信业务背景”。模型回答必须包含授权 `document_id` 引用；缺少可靠命中或引用校验失败时返回 `NO_GROUNDED_ANSWER`。数据查询的 SQL 生成和修复 Prompt 不包含知识库内容，只使用授权 Schema 和既有安全策略。
+知识上下文只进入 `grounded_answer` Prompt，并明确标记为“不可信业务背景”。模型回答必须包含授权 `document_id` 引用；缺少可靠命中或引用校验失败时返回 `NO_GROUNDED_ANSWER`。数据查询的 SQL 生成和修复 Prompt 不包含知识库内容，只使用授权 Schema 和既有安全策略。知识检索异常只影响需要知识依据的回答分支，普通通用回答和数据查询不因知识库不可用而越权或改变路由。
 
 公共 `QueryResponse` 增加可选 `knowledge_hits`，默认空列表，因此历史会话响应仍可反序列化。SSE 在 `retrieve_knowledge` 进度中报告命中数量和知识检索可用性；会话持久化保存新增进度和最终响应字段。
 
