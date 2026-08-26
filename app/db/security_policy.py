@@ -97,7 +97,9 @@ def validate_readonly_sql(
     if _has_comment_outside_quotes(sql):
         # 解析前拒绝注释，防止隐藏子句和策略绕过。
         return SQLValidationResult(False, "comments_not_allowed")
-    named_parameters = set(re.findall(r"(?<!:):([A-Za-z_][A-Za-z0-9_]*)", sql))
+    # SQLite accepts Unicode named parameters, which is required for Chinese
+    # result-reference bindings such as :selected_订单_编号.
+    named_parameters = set(re.findall(r"(?<!:):((?:[^\W\d]|_)\w*)", sql, flags=re.UNICODE))
     if named_parameters and allowed_parameters is None:
         return SQLValidationResult(False, "parameters_not_allowed")
     if allowed_parameters is not None and not named_parameters.issubset(allowed_parameters):

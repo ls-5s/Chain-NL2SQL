@@ -82,3 +82,14 @@ def test_rejects_legacy_english_demo_identifiers(policy: AccessPolicy) -> None:
 
     assert not result.allowed
     assert result.reason == "table_not_allowed"
+
+
+def test_allows_authorized_chinese_named_parameter(policy: AccessPolicy) -> None:
+    result = validate_readonly_sql(
+        'SELECT "编号" FROM "用户" WHERE "编号" = :selected_用户_编号',
+        "sqlite",
+        policy,
+        allowed_parameters={"selected_用户_编号"},
+    )
+
+    assert result.allowed
