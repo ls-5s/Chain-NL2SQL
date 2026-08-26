@@ -24,16 +24,16 @@ from tests.fakes.fake_llm import FakeLLM
 def documents() -> list[SchemaDocument]:
     return [
         SchemaDocument(
-            table_name="users",
-            content="TABLE users\nCOLUMNS id INTEGER, email TEXT, name TEXT\nPRIMARY KEY id\nFOREIGN KEYS none",
+            table_name="用户",
+            content="TABLE 用户\nCOLUMNS 编号 INTEGER, 邮箱 TEXT, 用户名称 TEXT\nPRIMARY KEY 编号\nFOREIGN KEYS none",
             database_id="demo",
-            column_names=["id", "email", "name"],
+            column_names=["编号", "邮箱", "用户名称"],
         ),
         SchemaDocument(
-            table_name="orders",
-            content="TABLE orders\nCOLUMNS id INTEGER, user_id INTEGER, total_amount REAL\nPRIMARY KEY id\nFOREIGN KEYS user_id->users.id",
+            table_name="订单",
+            content="TABLE 订单\nCOLUMNS 编号 INTEGER, 用户编号 INTEGER, 实付金额 REAL\nPRIMARY KEY 编号\nFOREIGN KEYS 用户编号->用户.编号",
             database_id="demo",
-            column_names=["id", "user_id", "total_amount"],
+            column_names=["编号", "用户编号", "实付金额"],
         ),
     ]
 
@@ -46,7 +46,7 @@ def retrieval_source(database_id: str) -> SchemaRetrieval:
 def test_bm25_roundtrip(tmp_path: Path) -> None:
     store = BM25Store.build(tmp_path, documents())
     loaded = BM25Store.load(tmp_path)
-    assert [hit.document_id for hit in loaded.query("email", 1)] == ["0"]
+    assert [hit.document_id for hit in loaded.query("邮箱", 1)] == ["0"]
     assert len(store.documents) == 2
 
 
@@ -61,36 +61,36 @@ def test_rrf_deduplicates_and_applies_reranker() -> None:
         [VectorHit("0", 0.8)],
         top_k=2,
         reranker=FakeReranker(),
-        question="orders",
+        question="订单",
     )
-    assert [item.document.table_name for item in ranked] == ["orders", "users"]
+    assert [item.document.table_name for item in ranked] == ["订单", "用户"]
 
 
 def test_index_manager_filters_columns_and_persists(tmp_path: Path) -> None:
     manager = SchemaIndexManager(retrieval_source, root=tmp_path, mode="bm25", top_k=5)
     request = SchemaRetrievalRequest(
-        question="users email",
+        question="用户 邮箱",
         database_id="demo",
         dialect="sqlite",
-        allowed_tables=frozenset({"users"}),
-        allowed_columns={"users": frozenset({"id", "name"})},
+        allowed_tables=frozenset({"用户"}),
+        allowed_columns={"用户": frozenset({"编号", "用户名称"})},
     )
     result = manager.retrieve(request)
-    assert [document.table_name for document in result.documents] == ["users"]
-    assert result.documents[0].column_names == ["id", "name"]
-    assert "email" not in result.documents[0].content
+    assert [document.table_name for document in result.documents] == ["用户"]
+    assert result.documents[0].column_names == ["编号", "用户名称"]
+    assert "邮箱" not in result.documents[0].content
     manifests = list((tmp_path / "demo" / "v1").glob("*/manifest.json"))
     assert len(manifests) == 1
     manifest = manifests[0].read_text(encoding="utf-8")
     assert '"scope_hash"' in manifest
-    assert '"tokenizer_version": "aliases-v1"' in manifest
+    assert '"tokenizer_version": "aliases-v2"' in manifest
     bm25_payload = manifests[0].with_name("bm25.json").read_text(encoding="utf-8")
-    assert '"table_name": "users"' in bm25_payload
-    assert '"table_name": "orders"' not in bm25_payload
+    assert '"table_name": "用户"' in bm25_payload
+    assert '"table_name": "订单"' not in bm25_payload
 
     second = manager.retrieve(request)
     assert second.schema_version == "v1"
-    assert second.documents[0].column_names == ["id", "name"]
+    assert second.documents[0].column_names == ["编号", "用户名称"]
 
 
 def test_index_manager_empty_table_allowlist_returns_no_documents(tmp_path: Path) -> None:
@@ -121,40 +121,40 @@ def test_hybrid_degrades_to_bm25_when_embedding_unavailable(tmp_path: Path) -> N
         embedding_factory=unavailable_embedding,
     )
     result = manager.retrieve(
-        SchemaRetrievalRequest("users email", "demo", "sqlite", frozenset({"users"}), {"users": frozenset({"id", "email", "name"})})
+        SchemaRetrievalRequest("用户 邮箱", "demo", "sqlite", frozenset({"用户"}), {"用户": frozenset({"编号", "邮箱", "用户名称"})})
     )
     assert result.retrieval_mode == "bm25"
-    assert result.documents[0].table_name == "users"
+    assert result.documents[0].table_name == "用户"
 
 
-def test_bm25_aliases_retrieve_users_for_chinese_question(tmp_path: Path) -> None:
+def test_bm25_aliases_retrieve_user_for_chinese_question(tmp_path: Path) -> None:
     manager = SchemaIndexManager(retrieval_source, root=tmp_path, mode="bm25", top_k=2)
     result = manager.retrieve(
         SchemaRetrievalRequest(
             question="查询用户数量",
             database_id="demo",
             dialect="sqlite",
-            allowed_tables=frozenset({"users", "orders"}),
+            allowed_tables=frozenset({"用户", "订单"}),
             allowed_columns={},
         )
     )
     assert result.documents
-    assert "users" in {document.table_name for document in result.documents}
+    assert "用户" in {document.table_name for document in result.documents}
 
 
 def test_bm25_miss_falls_back_to_all_authorized_schema(tmp_path: Path) -> None:
     articles = SchemaDocument(
-        table_name="articles",
-        content="TABLE articles\nCOLUMNS id BIGINT, title VARCHAR\nPRIMARY KEY id\nFOREIGN KEYS none",
+        table_name="文章",
+        content="TABLE 文章\nCOLUMNS 编号 BIGINT, 标题 VARCHAR\nPRIMARY KEY 编号\nFOREIGN KEYS none",
         database_id="test",
-        column_names=["id", "title"],
+        column_names=["编号", "标题"],
         dialect="mysql",
     )
     users = SchemaDocument(
-        table_name="users",
-        content="TABLE users\nCOLUMNS id BIGINT, username VARCHAR\nPRIMARY KEY id\nFOREIGN KEYS none",
+        table_name="用户",
+        content="TABLE 用户\nCOLUMNS 编号 BIGINT, 用户名称 VARCHAR\nPRIMARY KEY 编号\nFOREIGN KEYS none",
         database_id="test",
-        column_names=["id", "username"],
+        column_names=["编号", "用户名称"],
         dialect="mysql",
     )
 
@@ -165,17 +165,17 @@ def test_bm25_miss_falls_back_to_all_authorized_schema(tmp_path: Path) -> None:
     manager = SchemaIndexManager(source, root=tmp_path, mode="bm25", top_k=1)
     result = manager.retrieve(
         SchemaRetrievalRequest(
-            question="查询有哪些博客文章",
+            question="查询南极气候",
             database_id="test",
             dialect="mysql",
-            allowed_tables=frozenset({"articles", "users"}),
+            allowed_tables=frozenset({"文章", "用户"}),
             allowed_columns={},
         )
     )
 
     assert result.retrieval_mode == "authorized_full_schema"
     assert result.retrieval_scores == {}
-    assert [document.table_name for document in result.documents] == ["articles", "users"]
+    assert [document.table_name for document in result.documents] == ["文章", "用户"]
 
 
 def test_bm25_miss_fallback_never_includes_unauthorized_schema(tmp_path: Path) -> None:
@@ -191,13 +191,13 @@ def test_bm25_miss_fallback_never_includes_unauthorized_schema(tmp_path: Path) -
             question="查询博客文章",
             database_id="demo",
             dialect="sqlite",
-            allowed_tables=frozenset({"users"}),
+            allowed_tables=frozenset({"用户"}),
             allowed_columns={},
         )
     )
 
     assert result.retrieval_mode == "authorized_full_schema"
-    assert [document.table_name for document in result.documents] == ["users"]
+    assert [document.table_name for document in result.documents] == ["用户"]
 
 
 def test_bm25_miss_continues_graph_with_authorized_schema(tmp_path: Path) -> None:
@@ -214,7 +214,7 @@ def test_bm25_miss_continues_graph_with_authorized_schema(tmp_path: Path) -> Non
     executor = Executor()
     llm = FakeLLM([
         '{"intent":"data_query","confidence":0.95,"reason":"查询本地文章数据"}',
-        "SELECT COUNT(*) FROM users",
+        'SELECT COUNT(*) FROM "用户"',
     ])
     retriever = SchemaIndexManager(
         retrieval_source,
@@ -228,7 +228,7 @@ def test_bm25_miss_continues_graph_with_authorized_schema(tmp_path: Path) -> Non
         schema_retriever=retriever,
         access_policy=AccessPolicy(
             allowed_database_ids=frozenset({"demo"}),
-            allowed_tables=frozenset({"users", "orders"}),
+            allowed_tables=frozenset({"用户", "订单"}),
             allowed_columns={},
         ),
         query_timeout_seconds=5,
@@ -246,7 +246,7 @@ def test_bm25_miss_continues_graph_with_authorized_schema(tmp_path: Path) -> Non
 
     assert state["status"] == "succeeded"
     assert state["retrieval_mode"] == "authorized_full_schema"
-    assert state["retrieved_tables"] == ["users", "orders"]
+    assert state["retrieved_tables"] == ["用户", "订单"]
     assert state["query_result"].rows == [[2]]
     assert llm.prompts
 
@@ -256,7 +256,7 @@ def test_schema_source_permission_error_is_controlled(tmp_path: Path) -> None:
         raise PermissionError("manifest denied")
 
     manager = SchemaIndexManager(denied_source, root=tmp_path, mode="bm25")
-    request = SchemaRetrievalRequest("users", "demo", "sqlite", frozenset({"users"}), {})
+    request = SchemaRetrievalRequest("用户", "demo", "sqlite", frozenset({"用户"}), {})
     with pytest.raises(SchemaRetrievalError, match="Unable to read"):
         manager.retrieve(request)
 
@@ -282,7 +282,7 @@ def test_empty_retrieval_fails_closed_before_sql_generation() -> None:
         schema_retriever=EmptyRetriever(),
         access_policy=AccessPolicy(
             allowed_database_ids=frozenset({"demo"}),
-            allowed_tables=frozenset({"users"}),
+            allowed_tables=frozenset({"用户"}),
         ),
         query_timeout_seconds=5,
     )
@@ -322,7 +322,7 @@ def test_sqlite_schema_retriever_empty_table_allowlist_returns_no_documents() ->
 def test_schema_index_manager_reaches_sql_prompt_for_chinese_query(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[2]
     adapter = SQLiteAdapter("demo", str(root / "data" / "demo.sqlite"))
-    llm = FakeLLM(["SELECT COUNT(*) AS user_count FROM users"])
+    llm = FakeLLM(['SELECT COUNT(*) AS "用户数量" FROM "用户"'])
     retriever = SchemaIndexManager(adapter.inspect_schema, root=tmp_path, mode="bm25", top_k=2)
     graph = build_query_graph(
         database_executor=adapter,
@@ -330,13 +330,8 @@ def test_schema_index_manager_reaches_sql_prompt_for_chinese_query(tmp_path: Pat
         schema_retriever=retriever,
         access_policy=AccessPolicy(
             allowed_database_ids=frozenset({"demo"}),
-            allowed_tables=frozenset({"users", "orders", "products", "order_items"}),
-            allowed_columns={
-                "users": frozenset({"id", "name", "email", "created_at"}),
-                "orders": frozenset({"id", "user_id", "status", "total_amount", "created_at"}),
-                "products": frozenset({"id", "name", "category", "price"}),
-                "order_items": frozenset({"id", "order_id", "product_id", "quantity", "unit_price"}),
-            },
+            allowed_tables=frozenset({"用户", "订单", "商品", "订单明细"}),
+            allowed_columns={},
         ),
         query_timeout_seconds=5,
     )
@@ -350,9 +345,9 @@ def test_schema_index_manager_reaches_sql_prompt_for_chinese_query(tmp_path: Pat
         )
     )
     assert state["status"] == "succeeded"
-    assert "users" in state["retrieved_tables"]
-    assert any("TABLE users" in prompt.to_string() for prompt in llm.prompts)
-    assert state["query_result"].rows == [[3]]
+    assert "用户" in state["retrieved_tables"]
+    assert any("TABLE 用户" in prompt.to_string() for prompt in llm.prompts)
+    assert state["query_result"].rows == [[1000]]
 
 
 class RepairExecutor:
@@ -377,15 +372,15 @@ class RepairExecutor:
 
 def test_repair_reuses_fixed_schema_and_retries_execution() -> None:
     executor = RepairExecutor()
-    llm = FakeLLM(["SELECT COUNT(*) FROM users", "SELECT COUNT(*) FROM users"])
+    llm = FakeLLM(['SELECT COUNT(*) FROM "用户"', 'SELECT COUNT(*) FROM "用户"'])
     graph = build_query_graph(
         database_executor=executor,
         llm_client=llm,
         schema_retriever=SQLiteSchemaRetriever(executor),
         access_policy=AccessPolicy(
             allowed_database_ids=frozenset({"demo"}),
-            allowed_tables=frozenset({"users"}),
-            allowed_columns={"users": frozenset({"id", "email", "name"})},
+            allowed_tables=frozenset({"用户"}),
+            allowed_columns={"用户": frozenset({"编号", "邮箱", "用户名称"})},
         ),
         query_timeout_seconds=5,
     )
@@ -402,7 +397,7 @@ def test_repair_reuses_fixed_schema_and_retries_execution() -> None:
     assert state["query_result"].rows == [[2]]
     assert state["iteration"] == 2
     assert len(llm.prompts) == 3
-    assert "TABLE users" in llm.prompts[1].to_string()
+    assert "TABLE 用户" in llm.prompts[1].to_string()
 
 
 def test_reranker_failure_recomputes_bm25(tmp_path: Path) -> None:
@@ -417,10 +412,10 @@ def test_reranker_failure_recomputes_bm25(tmp_path: Path) -> None:
         reranker_factory=unavailable_reranker,
     )
     result = manager.retrieve(
-        SchemaRetrievalRequest("email", "demo", "sqlite", frozenset({"users", "orders"}), {})
+        SchemaRetrievalRequest("邮箱", "demo", "sqlite", frozenset({"用户", "订单"}), {})
     )
     assert result.retrieval_mode == "bm25"
-    assert result.documents[0].table_name == "users"
+    assert result.documents[0].table_name == "用户"
 
 
 def test_vector_index_with_injected_embedding(tmp_path: Path) -> None:
@@ -428,16 +423,16 @@ def test_vector_index_with_injected_embedding(tmp_path: Path) -> None:
         model_name = "fake-embedding"
 
         def embed_documents(self, texts: list[str]) -> list[list[float]]:
-            return [[1.0, 0.0] if "email" in text else [0.0, 1.0] for text in texts]
+            return [[1.0, 0.0] if "邮箱" in text else [0.0, 1.0] for text in texts]
 
         def embed_query(self, text: str) -> list[float]:
-            return [1.0, 0.0] if "email" in text else [0.0, 1.0]
+            return [1.0, 0.0] if "邮箱" in text else [0.0, 1.0]
 
     class FakeReranker:
         model_name = "fake-reranker"
 
         def rerank(self, question: str, contents: list[str]) -> list[float]:
-            return [1.0 if "email" in content else 0.0 for content in contents]
+            return [1.0 if "邮箱" in content else 0.0 for content in contents]
 
     manager = SchemaIndexManager(
         retrieval_source,
@@ -448,10 +443,10 @@ def test_vector_index_with_injected_embedding(tmp_path: Path) -> None:
         reranker_factory=FakeReranker,
     )
     result = manager.retrieve(
-        SchemaRetrievalRequest("email", "demo", "sqlite", frozenset({"users", "orders"}), {})
+        SchemaRetrievalRequest("邮箱", "demo", "sqlite", frozenset({"用户", "订单"}), {})
     )
     assert result.retrieval_mode == "vector"
-    assert result.documents[0].table_name == "users"
+    assert result.documents[0].table_name == "用户"
 
 
 class DriftExecutor:
@@ -463,7 +458,7 @@ class DriftExecutor:
 
 
 def test_execution_blocks_schema_drift() -> None:
-    policy = AccessPolicy(allowed_database_ids=frozenset({"demo"}), allowed_tables=frozenset({"users"}))
+    policy = AccessPolicy(allowed_database_ids=frozenset({"demo"}), allowed_tables=frozenset({"用户"}))
     node = make_execution_node(DriftExecutor(), policy, 5)
     state = {
         "request_id": "r",

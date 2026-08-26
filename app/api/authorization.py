@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from app.config.settings import Settings
+from app.demo import DEMO_MASKED_COLUMNS, DEMO_TABLES
 
 
 @dataclass(frozen=True)
@@ -90,15 +91,10 @@ class AccessPolicy:
 def local_access_policy(settings: Settings, database_ids: frozenset[str] | None = None) -> AccessPolicy:
     # Database IDs are supplied by the server-side registry. The legacy
     # settings field is intentionally ignored so new registrations are usable.
-    # The demo database keeps its established table, column, and masking rules.
+    # The demo schema is generated locally and all of its public fields are readable.
     return AccessPolicy(
         allowed_database_ids=database_ids or frozenset(),
-        allowed_tables=frozenset({"users", "products", "orders", "order_items"}),
-        allowed_columns={
-            "users": frozenset({"id", "name", "email", "created_at"}),
-            "products": frozenset({"id", "name", "category", "price"}),
-            "orders": frozenset({"id", "user_id", "status", "total_amount", "created_at"}),
-            "order_items": frozenset({"id", "order_id", "product_id", "quantity", "unit_price"}),
-        },
-        masked_columns=frozenset({"users.email"}),
+        allowed_tables=DEMO_TABLES,
+        allowed_columns={},
+        masked_columns=DEMO_MASKED_COLUMNS,
     )

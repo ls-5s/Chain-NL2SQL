@@ -1,64 +1,72 @@
 PRAGMA foreign_keys = ON;
 
--- Recreate the demo schema so every initialization starts from the same state.
-DROP TABLE IF EXISTS order_items;
-DROP TABLE IF EXISTS orders;
-DROP TABLE IF EXISTS products;
-DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS "积分流水";
+DROP TABLE IF EXISTS "会员积分账户";
+DROP TABLE IF EXISTS "退货明细";
+DROP TABLE IF EXISTS "退货单";
+DROP TABLE IF EXISTS "工单消息";
+DROP TABLE IF EXISTS "客服工单";
+DROP TABLE IF EXISTS "心愿单明细";
+DROP TABLE IF EXISTS "心愿单";
+DROP TABLE IF EXISTS "商品评价";
+DROP TABLE IF EXISTS "促销活动";
+DROP TABLE IF EXISTS "优惠券使用记录";
+DROP TABLE IF EXISTS "优惠券";
+DROP TABLE IF EXISTS "物流节点";
+DROP TABLE IF EXISTS "物流单";
+DROP TABLE IF EXISTS "退款记录";
+DROP TABLE IF EXISTS "支付记录";
+DROP TABLE IF EXISTS "订单明细";
+DROP TABLE IF EXISTS "订单";
+DROP TABLE IF EXISTS "购物车明细";
+DROP TABLE IF EXISTS "购物车";
+DROP TABLE IF EXISTS "库存流水";
+DROP TABLE IF EXISTS "库存";
+DROP TABLE IF EXISTS "仓库";
+DROP TABLE IF EXISTS "商品规格";
+DROP TABLE IF EXISTS "商品";
+DROP TABLE IF EXISTS "供应商";
+DROP TABLE IF EXISTS "商品分类";
+DROP TABLE IF EXISTS "用户分层";
+DROP TABLE IF EXISTS "收货地址";
+DROP TABLE IF EXISTS "用户";
 
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
-    email TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
+CREATE TABLE "用户" ("编号" INTEGER PRIMARY KEY, "用户名称" TEXT NOT NULL, "邮箱" TEXT NOT NULL, "手机号" TEXT NOT NULL, "性别" TEXT NOT NULL, "出生日期" TEXT NOT NULL, "注册渠道" TEXT NOT NULL, "账户状态" TEXT NOT NULL, "会员等级" TEXT NOT NULL, "注册地区" TEXT NOT NULL, "最近登录时间" TEXT NOT NULL, "创建时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "收货地址" ("编号" INTEGER PRIMARY KEY, "用户编号" INTEGER NOT NULL REFERENCES "用户"("编号"), "收件人" TEXT NOT NULL, "收件手机号" TEXT NOT NULL, "省份" TEXT NOT NULL, "城市" TEXT NOT NULL, "区县" TEXT NOT NULL, "详细地址" TEXT NOT NULL, "邮政编码" TEXT NOT NULL, "纬度" REAL NOT NULL, "经度" REAL NOT NULL, "是否默认" INTEGER NOT NULL, "地址状态" TEXT NOT NULL, "创建时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "用户分层" ("编号" INTEGER PRIMARY KEY, "用户编号" INTEGER NOT NULL REFERENCES "用户"("编号"), "分层编码" TEXT NOT NULL, "分层名称" TEXT NOT NULL, "生命周期" TEXT NOT NULL, "RFM得分" INTEGER NOT NULL, "来源渠道" TEXT NOT NULL, "分配方式" TEXT NOT NULL, "生效时间" TEXT NOT NULL, "失效时间" TEXT NOT NULL, "状态" TEXT NOT NULL, "创建时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "商品分类" ("编号" INTEGER PRIMARY KEY, "名称" TEXT NOT NULL, "分类编码" TEXT NOT NULL, "上级分类编号" INTEGER REFERENCES "商品分类"("编号"), "层级" INTEGER NOT NULL, "路径" TEXT NOT NULL, "描述" TEXT NOT NULL, "排序" INTEGER NOT NULL, "状态" TEXT NOT NULL, "创建时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "供应商" ("编号" INTEGER PRIMARY KEY, "供应商名称" TEXT NOT NULL, "供应商编码" TEXT NOT NULL, "联系人" TEXT NOT NULL, "联系邮箱" TEXT NOT NULL, "联系电话" TEXT NOT NULL, "省份" TEXT NOT NULL, "城市" TEXT NOT NULL, "评级" TEXT NOT NULL, "结算周期天数" INTEGER NOT NULL, "合作状态" TEXT NOT NULL, "地址" TEXT NOT NULL, "创建时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "商品" ("编号" INTEGER PRIMARY KEY, "商品名称" TEXT NOT NULL, "商品编码" TEXT NOT NULL, "分类编号" INTEGER NOT NULL REFERENCES "商品分类"("编号"), "供应商编号" INTEGER NOT NULL REFERENCES "供应商"("编号"), "品牌" TEXT NOT NULL, "SPU编码" TEXT NOT NULL, "单位" TEXT NOT NULL, "成本价" REAL NOT NULL, "销售价" REAL NOT NULL, "市场价" REAL NOT NULL, "税率" REAL NOT NULL, "重量克" REAL NOT NULL, "上架状态" TEXT NOT NULL, "库存状态" TEXT NOT NULL, "商品描述" TEXT NOT NULL, "创建时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "商品规格" ("编号" INTEGER PRIMARY KEY, "商品编号" INTEGER NOT NULL REFERENCES "商品"("编号"), "SKU编码" TEXT NOT NULL, "条码" TEXT NOT NULL, "颜色" TEXT NOT NULL, "尺码" TEXT NOT NULL, "材质" TEXT NOT NULL, "规格名称" TEXT NOT NULL, "成本价" REAL NOT NULL, "销售价" REAL NOT NULL, "重量克" REAL NOT NULL, "是否默认" INTEGER NOT NULL, "上架状态" TEXT NOT NULL, "创建时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "仓库" ("编号" INTEGER PRIMARY KEY, "仓库名称" TEXT NOT NULL, "仓库编码" TEXT NOT NULL, "仓库类型" TEXT NOT NULL, "负责人" TEXT NOT NULL, "联系电话" TEXT NOT NULL, "省份" TEXT NOT NULL, "城市" TEXT NOT NULL, "详细地址" TEXT NOT NULL, "容量件数" INTEGER NOT NULL, "状态" TEXT NOT NULL, "创建时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "库存" ("编号" INTEGER PRIMARY KEY, "商品编号" INTEGER NOT NULL REFERENCES "商品"("编号"), "仓库编号" INTEGER NOT NULL REFERENCES "仓库"("编号"), "批次号" TEXT NOT NULL, "在库数量" INTEGER NOT NULL, "锁定数量" INTEGER NOT NULL, "可售数量" INTEGER NOT NULL, "安全库存" INTEGER NOT NULL, "采购价" REAL NOT NULL, "库存金额" REAL NOT NULL, "库存状态" TEXT NOT NULL, "最后盘点时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "库存流水" ("编号" INTEGER PRIMARY KEY, "库存编号" INTEGER NOT NULL REFERENCES "库存"("编号"), "商品编号" INTEGER NOT NULL REFERENCES "商品"("编号"), "仓库编号" INTEGER NOT NULL REFERENCES "仓库"("编号"), "变动类型" TEXT NOT NULL, "变动数量" INTEGER NOT NULL, "变动前数量" INTEGER NOT NULL, "变动后数量" INTEGER NOT NULL, "来源单据类型" TEXT NOT NULL, "来源单据编号" TEXT NOT NULL, "操作人" TEXT NOT NULL, "备注" TEXT NOT NULL, "发生时间" TEXT NOT NULL, "创建时间" TEXT NOT NULL);
+CREATE TABLE "购物车" ("编号" INTEGER PRIMARY KEY, "用户编号" INTEGER NOT NULL REFERENCES "用户"("编号"), "渠道" TEXT NOT NULL, "币种" TEXT NOT NULL, "状态" TEXT NOT NULL, "商品数量" INTEGER NOT NULL, "失效时间" TEXT NOT NULL, "创建时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "购物车明细" ("编号" INTEGER PRIMARY KEY, "购物车编号" INTEGER NOT NULL REFERENCES "购物车"("编号"), "商品编号" INTEGER NOT NULL REFERENCES "商品"("编号"), "商品规格编号" INTEGER NOT NULL REFERENCES "商品规格"("编号"), "数量" INTEGER NOT NULL, "原价" REAL NOT NULL, "成交单价" REAL NOT NULL, "折扣金额" REAL NOT NULL, "是否选中" INTEGER NOT NULL, "备注" TEXT NOT NULL, "加入时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "订单" ("编号" INTEGER PRIMARY KEY, "订单号" TEXT NOT NULL, "用户编号" INTEGER NOT NULL REFERENCES "用户"("编号"), "收货地址编号" INTEGER NOT NULL REFERENCES "收货地址"("编号"), "渠道" TEXT NOT NULL, "币种" TEXT NOT NULL, "订单状态" TEXT NOT NULL, "支付状态" TEXT NOT NULL, "履约状态" TEXT NOT NULL, "商品金额" REAL NOT NULL, "运费金额" REAL NOT NULL, "优惠金额" REAL NOT NULL, "税费金额" REAL NOT NULL, "应付金额" REAL NOT NULL, "实付金额" REAL NOT NULL, "取消原因" TEXT NOT NULL, "下单时间" TEXT NOT NULL, "支付完成时间" TEXT NOT NULL, "创建时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "订单明细" ("编号" INTEGER PRIMARY KEY, "订单编号" INTEGER NOT NULL REFERENCES "订单"("编号"), "商品编号" INTEGER NOT NULL REFERENCES "商品"("编号"), "商品规格编号" INTEGER NOT NULL REFERENCES "商品规格"("编号"), "SKU编码" TEXT NOT NULL, "商品名称快照" TEXT NOT NULL, "数量" INTEGER NOT NULL, "原价" REAL NOT NULL, "成交单价" REAL NOT NULL, "折扣金额" REAL NOT NULL, "税费金额" REAL NOT NULL, "应付金额" REAL NOT NULL, "退款数量" INTEGER NOT NULL, "售后状态" TEXT NOT NULL, "商品评价状态" TEXT NOT NULL, "创建时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "支付记录" ("编号" INTEGER PRIMARY KEY, "订单编号" INTEGER NOT NULL REFERENCES "订单"("编号"), "支付单号" TEXT NOT NULL, "第三方交易号" TEXT NOT NULL, "支付方式" TEXT NOT NULL, "支付渠道" TEXT NOT NULL, "支付状态" TEXT NOT NULL, "支付金额" REAL NOT NULL, "手续费" REAL NOT NULL, "币种" TEXT NOT NULL, "失败原因" TEXT NOT NULL, "发起时间" TEXT NOT NULL, "完成时间" TEXT NOT NULL, "操作人" TEXT NOT NULL, "创建时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "退款记录" ("编号" INTEGER PRIMARY KEY, "退款单号" TEXT NOT NULL, "支付记录编号" INTEGER NOT NULL REFERENCES "支付记录"("编号"), "订单编号" INTEGER NOT NULL REFERENCES "订单"("编号"), "退款类型" TEXT NOT NULL, "退款状态" TEXT NOT NULL, "退款金额" REAL NOT NULL, "退款原因" TEXT NOT NULL, "第三方退款号" TEXT NOT NULL, "申请时间" TEXT NOT NULL, "审核时间" TEXT NOT NULL, "完成时间" TEXT NOT NULL, "处理人" TEXT NOT NULL, "创建时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "物流单" ("编号" INTEGER PRIMARY KEY, "物流单号" TEXT NOT NULL, "订单编号" INTEGER NOT NULL REFERENCES "订单"("编号"), "仓库编号" INTEGER NOT NULL REFERENCES "仓库"("编号"), "承运商" TEXT NOT NULL, "服务类型" TEXT NOT NULL, "物流状态" TEXT NOT NULL, "收件人" TEXT NOT NULL, "收件手机号" TEXT NOT NULL, "收件省份" TEXT NOT NULL, "收件城市" TEXT NOT NULL, "收件详细地址" TEXT NOT NULL, "包裹重量克" REAL NOT NULL, "运费金额" REAL NOT NULL, "发货时间" TEXT NOT NULL, "预计送达时间" TEXT NOT NULL, "实际送达时间" TEXT NOT NULL, "签收人" TEXT NOT NULL, "创建时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "物流节点" ("编号" INTEGER PRIMARY KEY, "物流单编号" INTEGER NOT NULL REFERENCES "物流单"("编号"), "事件类型" TEXT NOT NULL, "事件说明" TEXT NOT NULL, "所在地" TEXT NOT NULL, "操作人" TEXT NOT NULL, "异常代码" TEXT NOT NULL, "预计送达时间" TEXT NOT NULL, "是否异常" INTEGER NOT NULL, "发生时间" TEXT NOT NULL, "创建时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "优惠券" ("编号" INTEGER PRIMARY KEY, "优惠券编码" TEXT NOT NULL, "优惠券名称" TEXT NOT NULL, "优惠类型" TEXT NOT NULL, "优惠值" REAL NOT NULL, "最低消费金额" REAL NOT NULL, "适用商品范围" TEXT NOT NULL, "发放渠道" TEXT NOT NULL, "可叠加" INTEGER NOT NULL, "发放数量" INTEGER NOT NULL, "已使用数量" INTEGER NOT NULL, "开始时间" TEXT NOT NULL, "结束时间" TEXT NOT NULL, "状态" TEXT NOT NULL, "创建时间" TEXT NOT NULL);
+CREATE TABLE "优惠券使用记录" ("编号" INTEGER PRIMARY KEY, "优惠券编号" INTEGER NOT NULL REFERENCES "优惠券"("编号"), "订单编号" INTEGER NOT NULL REFERENCES "订单"("编号"), "用户编号" INTEGER NOT NULL REFERENCES "用户"("编号"), "优惠金额" REAL NOT NULL, "使用渠道" TEXT NOT NULL, "核销状态" TEXT NOT NULL, "领取时间" TEXT NOT NULL, "使用时间" TEXT NOT NULL, "核销时间" TEXT NOT NULL, "备注" TEXT NOT NULL, "创建时间" TEXT NOT NULL);
+CREATE TABLE "促销活动" ("编号" INTEGER PRIMARY KEY, "活动名称" TEXT NOT NULL, "活动编码" TEXT NOT NULL, "商品编号" INTEGER NOT NULL REFERENCES "商品"("编号"), "活动类型" TEXT NOT NULL, "折扣比例" REAL NOT NULL, "预算金额" REAL NOT NULL, "已用预算" REAL NOT NULL, "适用渠道" TEXT NOT NULL, "适用人群" TEXT NOT NULL, "可叠加" INTEGER NOT NULL, "活动状态" TEXT NOT NULL, "开始时间" TEXT NOT NULL, "结束时间" TEXT NOT NULL, "创建时间" TEXT NOT NULL);
+CREATE TABLE "商品评价" ("编号" INTEGER PRIMARY KEY, "用户编号" INTEGER NOT NULL REFERENCES "用户"("编号"), "商品编号" INTEGER NOT NULL REFERENCES "商品"("编号"), "订单明细编号" INTEGER NOT NULL REFERENCES "订单明细"("编号"), "评分" INTEGER NOT NULL, "标题" TEXT NOT NULL, "评价内容" TEXT NOT NULL, "图片数量" INTEGER NOT NULL, "是否匿名" INTEGER NOT NULL, "审核状态" TEXT NOT NULL, "商家回复" TEXT NOT NULL, "创建时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "心愿单" ("编号" INTEGER PRIMARY KEY, "用户编号" INTEGER NOT NULL REFERENCES "用户"("编号"), "名称" TEXT NOT NULL, "是否公开" INTEGER NOT NULL, "状态" TEXT NOT NULL, "商品数量" INTEGER NOT NULL, "创建时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "心愿单明细" ("编号" INTEGER PRIMARY KEY, "心愿单编号" INTEGER NOT NULL REFERENCES "心愿单"("编号"), "商品编号" INTEGER NOT NULL REFERENCES "商品"("编号"), "商品规格编号" INTEGER NOT NULL REFERENCES "商品规格"("编号"), "期望价格" REAL NOT NULL, "优先级" INTEGER NOT NULL, "状态" TEXT NOT NULL, "加入时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "客服工单" ("编号" INTEGER PRIMARY KEY, "工单号" TEXT NOT NULL, "用户编号" INTEGER NOT NULL REFERENCES "用户"("编号"), "订单编号" INTEGER NOT NULL REFERENCES "订单"("编号"), "工单分类" TEXT NOT NULL, "优先级" TEXT NOT NULL, "来源渠道" TEXT NOT NULL, "工单状态" TEXT NOT NULL, "主题" TEXT NOT NULL, "受理人" TEXT NOT NULL, "SLA截止时间" TEXT NOT NULL, "附件数量" INTEGER NOT NULL, "满意度评分" INTEGER NOT NULL, "创建时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "工单消息" ("编号" INTEGER PRIMARY KEY, "工单编号" INTEGER NOT NULL REFERENCES "客服工单"("编号"), "发送方类型" TEXT NOT NULL, "发送人" TEXT NOT NULL, "消息内容" TEXT NOT NULL, "是否内部消息" INTEGER NOT NULL, "附件数量" INTEGER NOT NULL, "已读状态" TEXT NOT NULL, "发送时间" TEXT NOT NULL, "创建时间" TEXT NOT NULL);
+CREATE TABLE "退货单" ("编号" INTEGER PRIMARY KEY, "退货单号" TEXT NOT NULL, "订单编号" INTEGER NOT NULL REFERENCES "订单"("编号"), "用户编号" INTEGER NOT NULL REFERENCES "用户"("编号"), "物流单号" TEXT NOT NULL, "退货状态" TEXT NOT NULL, "退货原因" TEXT NOT NULL, "退款金额" REAL NOT NULL, "质检结论" TEXT NOT NULL, "申请时间" TEXT NOT NULL, "收货时间" TEXT NOT NULL, "完成时间" TEXT NOT NULL, "处理人" TEXT NOT NULL, "创建时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "退货明细" ("编号" INTEGER PRIMARY KEY, "退货单编号" INTEGER NOT NULL REFERENCES "退货单"("编号"), "订单明细编号" INTEGER NOT NULL REFERENCES "订单明细"("编号"), "商品编号" INTEGER NOT NULL REFERENCES "商品"("编号"), "商品规格编号" INTEGER NOT NULL REFERENCES "商品规格"("编号"), "退货数量" INTEGER NOT NULL, "退款金额" REAL NOT NULL, "退货原因" TEXT NOT NULL, "质检结论" TEXT NOT NULL, "入库状态" TEXT NOT NULL, "创建时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "会员积分账户" ("编号" INTEGER PRIMARY KEY, "账户号" TEXT NOT NULL, "用户编号" INTEGER NOT NULL REFERENCES "用户"("编号"), "会员等级" TEXT NOT NULL, "当前积分" INTEGER NOT NULL, "冻结积分" INTEGER NOT NULL, "累计获取积分" INTEGER NOT NULL, "累计消耗积分" INTEGER NOT NULL, "即将过期积分" INTEGER NOT NULL, "最近到期时间" TEXT NOT NULL, "状态" TEXT NOT NULL, "创建时间" TEXT NOT NULL, "更新时间" TEXT NOT NULL);
+CREATE TABLE "积分流水" ("编号" INTEGER PRIMARY KEY, "积分账户编号" INTEGER NOT NULL REFERENCES "会员积分账户"("编号"), "用户编号" INTEGER NOT NULL REFERENCES "用户"("编号"), "交易类型" TEXT NOT NULL, "积分变动" INTEGER NOT NULL, "变动前积分" INTEGER NOT NULL, "变动后积分" INTEGER NOT NULL, "冻结积分变动" INTEGER NOT NULL, "来源单据类型" TEXT NOT NULL, "来源单据编号" TEXT NOT NULL, "备注" TEXT NOT NULL, "发生时间" TEXT NOT NULL, "创建时间" TEXT NOT NULL);
 
--- Product catalog used by order and aggregation examples.
-CREATE TABLE products (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
-    category TEXT NOT NULL,
-    price REAL NOT NULL
-);
-
--- Orders reference users and are intentionally simple enough for NL2SQL demos.
-CREATE TABLE orders (
-    id INTEGER PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id),
-    status TEXT NOT NULL,
-    total_amount REAL NOT NULL,
-    created_at TEXT NOT NULL
-);
-
--- Line items provide a second join path through products.
-CREATE TABLE order_items (
-    id INTEGER PRIMARY KEY,
-    order_id INTEGER NOT NULL REFERENCES orders(id),
-    product_id INTEGER NOT NULL REFERENCES products(id),
-    quantity INTEGER NOT NULL,
-    unit_price REAL NOT NULL
-);
-
--- Deterministic seed data keeps tests and demonstrations reproducible.
-INSERT INTO users (id, name, email, created_at) VALUES
-    (1, 'Alice', 'alice@example.test', '2026-01-05'),
-    (2, 'Bob', 'bob@example.test', '2026-01-06'),
-    (3, 'Carol', 'carol@example.test', '2026-01-07');
-
-INSERT INTO products (id, name, category, price) VALUES
-    (1, 'Keyboard', 'accessories', 79.00),
-    (2, 'Monitor', 'displays', 249.00),
-    (3, 'Mouse', 'accessories', 39.00),
-    (4, 'USB Hub', 'accessories', 29.00);
-
-INSERT INTO orders (id, user_id, status, total_amount, created_at) VALUES
-    (1, 1, 'paid', 328.00, '2026-02-01'),
-    (2, 2, 'paid', 79.00, '2026-02-02'),
-    (3, 1, 'pending', 68.00, '2026-02-03');
-
-INSERT INTO order_items (id, order_id, product_id, quantity, unit_price) VALUES
-    (1, 1, 2, 1, 249.00),
-    (2, 1, 1, 1, 79.00),
-    (3, 2, 1, 1, 79.00),
-    (4, 3, 3, 1, 39.00),
-    (5, 3, 4, 1, 29.00);
+CREATE INDEX "索引_收货地址_用户" ON "收货地址"("用户编号");
+CREATE INDEX "索引_订单_用户时间" ON "订单"("用户编号", "下单时间");
+CREATE INDEX "索引_订单明细_订单" ON "订单明细"("订单编号");
+CREATE INDEX "索引_库存_商品仓库" ON "库存"("商品编号", "仓库编号");
+CREATE INDEX "索引_支付_订单" ON "支付记录"("订单编号");
+CREATE INDEX "索引_物流_订单" ON "物流单"("订单编号");
+CREATE INDEX "索引_评价_商品" ON "商品评价"("商品编号");
+CREATE INDEX "索引_积分_账户" ON "积分流水"("积分账户编号");

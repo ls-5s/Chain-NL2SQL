@@ -13,6 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.config.settings import Settings
+from app.demo import DEMO_TABLES
 
 
 @dataclass(frozen=True)
@@ -92,11 +93,13 @@ class DatabaseRegistry:
                         now,
                     ),
                 )
-                for table in ("users", "products", "orders", "order_items"):
-                    connection.execute(
-                        "INSERT INTO database_table_permissions(database_id, table_name, agent_access, updated_at) VALUES ('demo', ?, 1, ?)",
-                        (table, now),
-                    )
+            # Extend legacy local registries with newly introduced demo tables
+            # without overriding an administrator's existing disabled choice.
+            for table in sorted(DEMO_TABLES):
+                connection.execute(
+                    "INSERT OR IGNORE INTO database_table_permissions(database_id, table_name, agent_access, updated_at) VALUES ('demo', ?, 1, ?)",
+                    (table, _now()),
+                )
             self._normalize_enabled(connection)
 
     @staticmethod

@@ -13,15 +13,15 @@ def response() -> QueryResponse:
         status=QueryStatus.SUCCEEDED,
         iteration=1,
         final_answer="查询完成。",
-        result=QueryResult(columns=["id", "name"], rows=[[7, "Ada"]], row_count=1),
-        generated_sql="SELECT id, name FROM users ORDER BY id",
+        result=QueryResult(columns=["编号", "用户名称"], rows=[[7, "用户0007"]], row_count=1),
+        generated_sql='SELECT "编号", "用户名称" FROM "用户" ORDER BY "编号"',
     )
 
 
 def test_persists_turn_context_reference_and_cascade_delete(tmp_path) -> None:
     repository = ConversationRepository(
         tmp_path / "conversations.sqlite3",
-        primary_key_resolver=lambda database_id, table: ("id",) if (database_id, table) == ("demo", "users") else (),
+        primary_key_resolver=lambda database_id, table: ("编号",) if (database_id, table) == ("demo", "用户") else (),
     )
     first = repository.create_conversation("single-user", "demo")
     second = repository.create_conversation("single-user", "demo")
@@ -42,7 +42,7 @@ def test_persists_turn_context_reference_and_cascade_delete(tmp_path) -> None:
 
     reference = repository.create_result_reference("single-user", first["id"], first_turn["turn_id"], 0)
     _, bindings = repository.build_context("single-user", first["id"], "查看该用户", 6000, [reference["id"]])
-    assert bindings == {"selected_users_id": 7}
+    assert bindings == {"selected_用户_编号": 7}
 
     repository.delete_conversation("single-user", first["id"])
     assert [item["id"] for item in repository.list_conversations("single-user")] == [second["id"]]

@@ -56,7 +56,7 @@ def test_real_http_input_to_output_runs_sql_and_grounded_rag(monkeypatch, tmp_pa
     routes._conversation_repositories.clear()
 
     llm = FakeLLM([
-        "SELECT COUNT(*) AS user_count FROM users",
+        'SELECT COUNT(*) AS "用户数量" FROM "用户"',
         f"销售额默认统计已支付订单。[{hit.document_id}]",
     ])
     monkeypatch.setattr(routes, "create_openai_client", lambda settings: llm)
@@ -75,7 +75,7 @@ def test_real_http_input_to_output_runs_sql_and_grounded_rag(monkeypatch, tmp_pa
     assert [name for name, _ in sql_events].count("complete") == 1
     sql_complete = next(data for name, data in sql_events if name == "complete")
     assert sql_complete["status"] == "succeeded"
-    assert sql_complete["result"]["rows"] == [[3]]
+    assert sql_complete["result"]["rows"] == [[1000]]
     assert any(data.get("node") == "retrieve_schema" for name, data in sql_events if name == "progress")
 
     knowledge_response = client.post(

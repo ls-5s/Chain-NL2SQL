@@ -11,6 +11,7 @@ pytest.importorskip("sqlglot")
 from app.api.authorization import AccessPolicy
 from app.db.base import DatabaseExecutionError
 from app.db.sqlite_adapter import SQLiteAdapter
+from app.demo import DEMO_MASKED_COLUMNS, DEMO_TABLES
 from scripts.init_demo_db import initialize
 
 
@@ -30,14 +31,9 @@ def policy() -> AccessPolicy:
     # 模拟适配器使用的服务端 P0 策略。
     return AccessPolicy(
         allowed_database_ids=frozenset({"demo"}),
-        allowed_tables=frozenset({"users", "products", "orders", "order_items"}),
-        allowed_columns={
-            "users": frozenset({"id", "name", "email", "created_at"}),
-            "products": frozenset({"id", "name", "category", "price"}),
-            "orders": frozenset({"id", "user_id", "status", "total_amount", "created_at"}),
-            "order_items": frozenset({"id", "order_id", "product_id", "quantity", "unit_price"}),
-        },
-        masked_columns=frozenset({"users.email"}),
+        allowed_tables=DEMO_TABLES,
+        allowed_columns={},
+        masked_columns=DEMO_MASKED_COLUMNS,
     )
 
 
@@ -45,15 +41,11 @@ def test_inspects_schema_and_version(demo_db: Path) -> None:
     # 重复读取时 Schema 检索结果必须保持确定性。
     adapter = SQLiteAdapter("demo", str(demo_db))
     retrieval = adapter.inspect_schema("demo")
-    assert [document.table_name for document in retrieval.documents] == [
-        "order_items",
-        "orders",
-        "products",
-        "users",
-    ]
-    users = next(document for document in retrieval.documents if document.table_name == "users")
-    assert "PRIMARY KEY id" in users.content
-    assert "email" in users.column_names
+    assert {document.table_name for document in retrieval.documents} == DEMO_TABLES
+    assert len(retrieval.documents) == 30
+    users = next(document for document in retrieval.documents if document.table_name == "用户")
+    assert "PRIMARY KEY 编号" in users.content
+    assert "邮箱" in users.column_names
     assert retrieval.schema_version == adapter.inspect_schema("demo").schema_version
 
 
@@ -63,7 +55,7 @@ def test_schema_version_changes_after_schema_change(demo_db: Path) -> None:
     before = adapter.inspect_schema("demo").schema_version
     connection = sqlite3.connect(demo_db)
     try:
-        connection.execute("ALTER TABLE users ADD COLUMN loyalty_tier TEXT")
+        connection.execute('ALTER TABLE "用户" ADD COLUMN "测试会员等级" TEXT')
         connection.commit()
     finally:
         connection.close()
@@ -74,11 +66,11 @@ def test_executes_with_masking_and_truncation(demo_db: Path, policy: AccessPolic
     # 适配器必须同时完成敏感数据脱敏和行数限制。
     adapter = SQLiteAdapter("demo", str(demo_db), result_row_limit=1)
     result = adapter.execute_readonly(
-        "SELECT email, name FROM users ORDER BY id",
+        'SELECT "邮箱", "用户名称" FROM "用户" ORDER BY "编号"',
         time.monotonic() + 5,
         policy,
     )
-    assert result.rows == [["***", "Alice"]]
+    assert result.rows == [["***", "用户0001"]]
     assert result.row_count == 1
     assert result.truncated is True
 
@@ -86,14 +78,14 @@ def test_executes_with_masking_and_truncation(demo_db: Path, policy: AccessPolic
 def test_result_guard_masks_sensitive_alias_after_execution(demo_db: Path, policy: AccessPolicy) -> None:
     adapter = SQLiteAdapter("demo", str(demo_db))
     result = adapter.execute_readonly(
-        "SELECT email AS contact FROM users ORDER BY id",
+        'SELECT "邮箱" AS "联系方式" FROM "用户" ORDER BY "编号"',
         time.monotonic() + 5,
         policy,
     )
     from app.db.result_guard import guard_query_result
 
     guarded = guard_query_result(
-        sql="SELECT email AS contact FROM users ORDER BY id",
+        sql='SELECT "邮箱" AS "联系方式" FROM "用户" ORDER BY "编号"',
         dialect="sqlite",
         result=result,
         access_policy=policy,
@@ -110,23 +102,23 @@ def test_binds_parameters_without_string_interpolation(
     # 参数与 SQL 文本分离传递，避免字符串插值。
     adapter = SQLiteAdapter("demo", str(demo_db))
     result = adapter.execute_readonly(
-        "SELECT name FROM users WHERE id = ?",
+        'SELECT "用户名称" FROM "用户" WHERE "编号" = ?',
         time.monotonic() + 5,
         policy,
         parameters=(2,),
     )
-    assert result.rows == [["Bob"]]
+    assert result.rows == [["用户0002"]]
 
 
 def test_binds_server_authorized_named_parameters(demo_db: Path, policy: AccessPolicy) -> None:
     adapter = SQLiteAdapter("demo", str(demo_db))
     result = adapter.execute_readonly(
-        "SELECT name FROM users WHERE id = :selected_users_id",
+        'SELECT "用户名称" FROM "用户" WHERE "编号" = :selected_user_id',
         time.monotonic() + 5,
         policy,
-        parameters={"selected_users_id": 2},
+        parameters={"selected_user_id": 2},
     )
-    assert result.rows == [["Bob"]]
+    assert result.rows == [["用户0002"]]
 
 
 def test_deadline_is_enforced(demo_db: Path, policy: AccessPolicy) -> None:

@@ -1,4 +1,4 @@
-"""Materialize the deterministic BM25 Schema-RAG index for the demo database."""
+"""Materialize a deterministic BM25 Schema-RAG index for the demo database."""
 
 from __future__ import annotations
 
@@ -13,17 +13,11 @@ from app.rag.index_manager import SchemaIndexManager
 from app.rag.retriever import SchemaRetrievalRequest
 
 
-TABLES = frozenset({"users", "products", "orders", "order_items"})
-COLUMNS = {
-    "users": frozenset({"id", "name", "email", "created_at"}),
-    "products": frozenset({"id", "name", "category", "price"}),
-    "orders": frozenset({"id", "user_id", "status", "total_amount", "created_at"}),
-    "order_items": frozenset({"id", "order_id", "product_id", "quantity", "unit_price"}),
-}
-
-
 def build(database: Path, index_root: Path, database_id: str = "demo") -> dict[str, object]:
+    """Build the index from every table and column actually present in SQLite."""
     adapter = SQLiteAdapter(database_id, str(database))
+    schema = adapter.inspect_schema(database_id)
+    tables = frozenset(document.table_name for document in schema.documents)
     manager = SchemaIndexManager(
         adapter.inspect_schema,
         root=index_root,
@@ -33,17 +27,19 @@ def build(database: Path, index_root: Path, database_id: str = "demo") -> dict[s
     )
     result = manager.retrieve(
         SchemaRetrievalRequest(
-            question="用户订单商品销售额数量金额",
+            question="用户 商品 订单 支付 库存 物流 优惠 售后 会员",
             database_id=database_id,
             dialect="sqlite",
-            allowed_tables=TABLES,
-            allowed_columns=COLUMNS,
+            allowed_tables=tables,
+            # Omitting per-table entries authorizes every current column.
+            allowed_columns={},
         )
     )
     return {
         "schema_version": result.schema_version,
         "retrieval_mode": result.retrieval_mode,
-        "tables": [document.table_name for document in result.documents],
+        "indexed_table_count": len(tables),
+        "retrieved_tables": [document.table_name for document in result.documents],
     }
 
 

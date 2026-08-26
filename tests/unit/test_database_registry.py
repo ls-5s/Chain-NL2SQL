@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from app.api import dependencies, routes
 from app.config.settings import get_settings
 from app.db.registry import DatabaseRegistry
+from app.demo import DEMO_TABLES
 from app.main import create_app
 
 
@@ -19,11 +20,14 @@ def test_registry_seeds_demo_and_keeps_new_tables_disabled(monkeypatch, tmp_path
     _configure(monkeypatch, tmp_path)
     settings = get_settings()
     registry = DatabaseRegistry(settings.conversation_database_path, settings)
-    assert registry.allowed_tables("demo") == {"users", "products", "orders", "order_items"}
-    registry.sync_tables("demo", ["users", "new_table"])
-    assert registry.allowed_tables("demo") == {"users"}
-    registry.set_table_access("demo", "new_table", True)
-    assert registry.allowed_tables("demo") == {"users", "new_table"}
+    assert registry.allowed_tables("demo") == DEMO_TABLES
+    registry.sync_tables("demo", list(DEMO_TABLES))
+    assert registry.allowed_tables("demo") == DEMO_TABLES
+    registry.create(name="External SQLite", dialect="sqlite", config={"path": str(tmp_path / "external.sqlite")})
+    registry.sync_tables("external-sqlite", ["新表"])
+    assert registry.allowed_tables("external-sqlite") == frozenset()
+    registry.set_table_access("external-sqlite", "新表", True)
+    assert registry.allowed_tables("external-sqlite") == {"新表"}
 
 
 def test_database_api_lists_and_updates_table_access(monkeypatch, tmp_path):
@@ -36,10 +40,10 @@ def test_database_api_lists_and_updates_table_access(monkeypatch, tmp_path):
     assert response.json()["database_ids"] == ["demo"]
     assert any(table["agent_access"] for table in response.json()["databases"][0]["tables"])
 
-    response = client.patch("/api/v1/databases/demo/tables/users", json={"agent_access": False})
+    response = client.patch("/api/v1/databases/demo/tables/用户", json={"agent_access": False})
     assert response.status_code == 200
     assert response.json()["agent_access"] is False
-    assert client.get("/api/v1/databases/demo/tables").json()[0]["table_name"] == "order_items"
+    assert not next(item for item in client.get("/api/v1/databases/demo/tables").json() if item["table_name"] == "用户")["agent_access"]
 
 
 def test_database_api_lists_only_active_registration_and_keeps_disabled_sources_visible(monkeypatch, tmp_path):

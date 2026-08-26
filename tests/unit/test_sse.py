@@ -8,6 +8,7 @@ import pytest
 from app.api.authorization import AccessPolicy
 from app.api.routes import _stream_graph
 from app.db.sqlite_adapter import SQLiteAdapter
+from app.demo import DEMO_TABLES
 from app.graph.builder import SQLiteSchemaRetriever, build_query_graph
 from app.graph.state import create_initial_state
 from tests.fakes.fake_llm import FakeLLM
@@ -19,13 +20,8 @@ ROOT = Path(__file__).resolve().parents[2]
 def policy() -> AccessPolicy:
     return AccessPolicy(
         allowed_database_ids=frozenset({"demo"}),
-        allowed_tables=frozenset({"users", "products", "orders", "order_items"}),
-        allowed_columns={
-            "users": frozenset({"id", "name", "email", "created_at"}),
-            "products": frozenset({"id", "name", "category", "price"}),
-            "orders": frozenset({"id", "user_id", "status", "total_amount", "created_at"}),
-            "order_items": frozenset({"id", "order_id", "product_id", "quantity", "unit_price"}),
-        },
+        allowed_tables=DEMO_TABLES,
+        allowed_columns={},
     )
 
 
@@ -59,7 +55,7 @@ def test_sse_data_path_emits_expected_events() -> None:
     database = SQLiteAdapter("demo", str(ROOT / "data" / "demo.sqlite"))
     graph = build_query_graph(
         database_executor=database,
-        llm_client=FakeLLM(["SELECT COUNT(*) AS count FROM users", "用户数量为 3。"]),
+        llm_client=FakeLLM(['SELECT COUNT(*) AS "数量" FROM "用户"', "用户数量为 1000。"]),
         schema_retriever=SQLiteSchemaRetriever(database),
         access_policy=policy(),
         query_timeout_seconds=15,

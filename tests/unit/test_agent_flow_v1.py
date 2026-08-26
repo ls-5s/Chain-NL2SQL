@@ -6,6 +6,7 @@ from pathlib import Path
 from app.api.authorization import AccessPolicy
 from app.api.routes import _stream_graph
 from app.db.sqlite_adapter import SQLiteAdapter
+from app.demo import DEMO_TABLES
 from app.graph.builder import SQLiteSchemaRetriever, build_query_graph
 from app.graph.state import create_initial_state
 from app.schemas.domain import QueryIntent, QueryStatus
@@ -18,13 +19,8 @@ ROOT = Path(__file__).resolve().parents[2]
 def policy() -> AccessPolicy:
     return AccessPolicy(
         allowed_database_ids=frozenset({"demo"}),
-        allowed_tables=frozenset({"users", "products", "orders", "order_items"}),
-        allowed_columns={
-            "users": frozenset({"id", "name", "email", "created_at"}),
-            "products": frozenset({"id", "name", "category", "price"}),
-            "orders": frozenset({"id", "user_id", "status", "total_amount", "created_at"}),
-            "order_items": frozenset({"id", "order_id", "product_id", "quantity", "unit_price"}),
-        },
+        allowed_tables=DEMO_TABLES,
+        allowed_columns={},
     )
 
 
@@ -71,12 +67,12 @@ def test_ambiguous_question_persists_required_clarification() -> None:
 
 def test_data_flow_is_the_only_path_that_reads_database() -> None:
     adapter = SQLiteAdapter("demo", str(ROOT / "data" / "demo.sqlite"))
-    result = make_graph(adapter, FakeLLM(["SELECT COUNT(*) AS count FROM users"])).invoke(
+    result = make_graph(adapter, FakeLLM(['SELECT COUNT(*) AS "数量" FROM "用户"'])).invoke(
         create_initial_state(request_id="data", question="查询用户数量", database_id="demo", dialect="sqlite", max_iterations=1)
     )
     assert result["intent"] == QueryIntent.DATA_QUERY
     assert result["status"] == QueryStatus.SUCCEEDED
-    assert result["query_result"].rows == [[3]]
+    assert result["query_result"].rows == [[1000]]
     assert [event.node for event in result["trace"] if event.node == "result_guard"] == ["result_guard"]
 
 

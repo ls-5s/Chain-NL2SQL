@@ -38,30 +38,30 @@ def _classification_response() -> str:
 
 def _sql_for(scenario: str) -> str:
     return {
-        "count_users": "SELECT COUNT(*) AS count FROM users",
-        "count_orders": "SELECT COUNT(*) AS count FROM orders",
-        "product_fields": "SELECT name, category FROM products ORDER BY id",
-        "paid_orders": "SELECT id FROM orders WHERE status = 'paid' ORDER BY id",
-        "large_orders": "SELECT id FROM orders WHERE total_amount > 300",
-        "order_aggregates": "SELECT AVG(total_amount), SUM(total_amount) FROM orders",
-        "status_counts": "SELECT status, COUNT(*) FROM orders GROUP BY status ORDER BY COUNT(*) DESC, status",
-        "order_users": "SELECT orders.id, users.name FROM orders JOIN users ON orders.user_id = users.id ORDER BY orders.id",
-        "product_quantities": "SELECT products.name, SUM(order_items.quantity) FROM products JOIN order_items ON products.id = order_items.product_id GROUP BY products.id, products.name ORDER BY products.id",
-        "top_products": "SELECT name, price FROM products ORDER BY price DESC LIMIT 2",
-        "recent_orders": "SELECT id FROM orders WHERE created_at >= '2026-01-01' ORDER BY id",
-        "empty_orders": "SELECT id FROM orders WHERE status = 'cancelled'",
-        "masked_email": "SELECT name, email FROM users ORDER BY id",
-        "unknown_column_repair": "SELECT missing_column FROM users",
-        "multiple_statements": "SELECT id FROM users; SELECT id FROM orders",
-        "delete_sql": "DELETE FROM users",
-        "dangerous_function": "SELECT readfile('secret.txt') FROM users",
+        "count_users": 'SELECT COUNT(*) AS "数量" FROM "用户"',
+        "count_orders": 'SELECT COUNT(*) AS "数量" FROM "订单"',
+        "product_fields": 'SELECT "商品名称", "品牌" FROM "商品" ORDER BY "编号" LIMIT 4',
+        "paid_orders": 'SELECT "编号" FROM "订单" WHERE "支付状态" = \'支付成功\' AND "编号" <= 3 ORDER BY "编号"',
+        "large_orders": 'SELECT "编号" FROM "订单" WHERE "实付金额" > 100 AND "编号" <= 3',
+        "order_aggregates": 'SELECT AVG("实付金额"), SUM("实付金额") FROM "订单" WHERE "编号" <= 3',
+        "status_counts": 'SELECT "订单状态", COUNT(*) FROM "订单" WHERE "编号" <= 3 GROUP BY "订单状态" ORDER BY COUNT(*) DESC, "订单状态"',
+        "order_users": 'SELECT "订单"."编号", "用户"."用户名称" FROM "订单" JOIN "用户" ON "订单"."用户编号" = "用户"."编号" WHERE "订单"."编号" <= 3 ORDER BY "订单"."编号"',
+        "product_quantities": 'SELECT "商品"."商品名称", SUM("订单明细"."数量") FROM "商品" JOIN "订单明细" ON "商品"."编号" = "订单明细"."商品编号" WHERE "订单明细"."订单编号" <= 3 GROUP BY "商品"."编号", "商品"."商品名称" ORDER BY "商品"."编号"',
+        "top_products": 'SELECT "商品名称", "销售价" FROM "商品" WHERE "编号" <= 4 ORDER BY "销售价" DESC LIMIT 2',
+        "recent_orders": 'SELECT "编号" FROM "订单" WHERE "下单时间" >= \'2026-01-01\' AND "编号" <= 3 ORDER BY "编号"',
+        "empty_orders": 'SELECT "编号" FROM "订单" WHERE "订单状态" = \'不存在\'',
+        "masked_email": 'SELECT "用户名称", "邮箱" FROM "用户" ORDER BY "编号" LIMIT 3',
+        "unknown_column_repair": 'SELECT "用户"."不存在字段" FROM "用户"',
+        "multiple_statements": 'SELECT "编号" FROM "用户"; SELECT "编号" FROM "订单"',
+        "delete_sql": 'DELETE FROM "用户"',
+        "dangerous_function": 'SELECT readfile(\'secret.txt\') FROM "用户"',
         "system_table": "SELECT name FROM sqlite_master",
-        "comment_sql": "SELECT id FROM users -- bypass",
-        "unknown_table": "SELECT id FROM missing_table",
+        "comment_sql": 'SELECT "编号" FROM "用户" -- bypass',
+        "unknown_table": 'SELECT "编号" FROM "不存在的表"',
         "pragma_sql": "PRAGMA user_version",
         "attach_sql": "ATTACH DATABASE 'other.sqlite' AS other",
-        "update_sql": "UPDATE users SET name = 'x'",
-        "drop_sql": "DROP TABLE users",
+        "update_sql": 'UPDATE "用户" SET "用户名称" = \'x\'',
+        "drop_sql": 'DROP TABLE "用户"',
     }[scenario]
 
 
@@ -85,7 +85,7 @@ def _llm_outcomes(record: dict[str, object], document_id: str) -> list[str | Exc
         # the rule gate, so the first model call is SQL generation itself.
         return [_sql_for(scenario)]
     if scenario == "unknown_column_repair":
-        return [_sql_for(scenario), "SELECT COUNT(*) AS count FROM users"]
+        return [_sql_for(scenario), 'SELECT COUNT(*) AS "数量" FROM "用户"']
     return [_sql_for(scenario)]
 
 
@@ -124,13 +124,12 @@ def test_user_question_matrix_through_http_and_persistence(monkeypatch, tmp_path
     seed(seed_database, seed_root, ROOT / "data" / "knowledge_sources")
     store = KnowledgeStore(seed_database, seed_root, workers=1)
     try:
-        hits = store.retrieve("销售额怎么算", user_id="admin", role="super_admin")
         document_titles = {
             "knowledge_rules": "order_rules.md",
             "knowledge_dictionary": "demo_dictionary.md",
         }
         target_title = document_titles.get(str(record["scenario"]), "sales_metrics.md")
-        document_id = next(item.document_id for item in hits if item.title == target_title)
+        document_id = next(item["id"] for item in store.list() if item["filename"] == target_title)
     finally:
         store.close()
 

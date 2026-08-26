@@ -68,7 +68,7 @@ def generation_prompt():
     return build_sql_generation_prompt().invoke(
         {
             "dialect": "sqlite",
-            "schema_context": "TABLE users(id INTEGER, name TEXT)",
+            "schema_context": "TABLE 用户(编号 INTEGER, 用户名称 TEXT)",
             "question": "查询所有用户",
         }
     )
@@ -84,12 +84,12 @@ def test_client_requires_key_and_model() -> None:
 
 
 def test_client_invokes_chat_model_with_configured_options() -> None:
-    factory = StubModelFactory([AIMessage(content="SELECT name FROM users")])
+    factory = StubModelFactory([AIMessage(content='SELECT "用户名称" FROM "用户"')])
     client = OpenAIChatClient(make_settings(), chat_model_factory=factory)
 
     response = client.generate(generation_prompt(), timeout_seconds=3)
 
-    assert response.content == "SELECT name FROM users"
+    assert response.content == 'SELECT "用户名称" FROM "用户"'
     assert response.model_name == "test-model"
     assert factory.options == [
         {
@@ -155,27 +155,27 @@ def test_client_preserves_transient_error_after_retry_budget_is_exhausted() -> N
 
 def test_generation_prompt_enforces_single_readonly_sql_output() -> None:
     prompt = build_sql_generation_prompt().invoke(
-        {"dialect": "sqlite", "schema_context": "TABLE users(id)", "question": "查询用户"}
+        {"dialect": "sqlite", "schema_context": "TABLE 用户(编号)", "question": "查询用户"}
     )
     content = "\n".join(message.content for message in prompt.to_messages() if isinstance(message.content, str))
 
     assert "仅返回一条只读 SQL" in content
     assert "不得返回 Markdown 围栏" in content
-    assert "TABLE users(id)" in content
+    assert "TABLE 用户(编号)" in content
 
 
 def test_repair_prompt_includes_the_sanitized_error_and_failed_sql() -> None:
     prompt = build_sql_repair_prompt().invoke(
         {
             "dialect": "sqlite",
-            "schema_context": "TABLE users(id)",
+            "schema_context": "TABLE 用户(编号)",
             "question": "查询用户",
-            "failed_sql": "SELECT missing FROM users",
+            "failed_sql": 'SELECT "不存在字段" FROM "用户"',
             "error_message": "unknown column",
         }
     )
     content = "\n".join(message.content for message in prompt.to_messages() if isinstance(message.content, str))
 
-    assert "SELECT missing FROM users" in content
+    assert 'SELECT "不存在字段" FROM "用户"' in content
     assert "unknown column" in content
     assert "已脱敏错误信息" in content

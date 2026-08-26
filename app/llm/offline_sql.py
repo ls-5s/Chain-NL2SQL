@@ -7,19 +7,19 @@ from collections.abc import Iterable
 from app.schemas.domain import SchemaDocument
 
 _TABLE_ALIASES = {
-    "products": ("商品", "产品", "product", "products"),
-    "users": ("用户", "客户", "user", "users"),
-    "orders": ("订单", "order", "orders"),
-    "order_items": ("订单明细", "明细", "order item", "order_items"),
+    "商品": ("商品", "产品"),
+    "用户": ("用户", "客户"),
+    "订单": ("订单",),
+    "订单明细": ("订单明细", "明细"),
 }
 _COLUMN_ALIASES = {
-    "name": ("名称", "名字", "name"),
-    "price": ("价格", "单价", "price"),
-    "category": ("类别", "分类", "category"),
-    "status": ("状态", "status"),
-    "total_amount": ("金额", "总额", "销售额", "total amount"),
-    "quantity": ("数量", "quantity"),
-    "created_at": ("时间", "日期", "created at"),
+    "商品名称": ("名称", "名字", "商品"),
+    "销售价": ("价格", "单价", "售价"),
+    "分类编号": ("类别", "分类"),
+    "订单状态": ("状态",),
+    "实付金额": ("金额", "总额", "销售额"),
+    "数量": ("数量",),
+    "创建时间": ("时间", "日期"),
 }
 
 
@@ -32,7 +32,7 @@ def generate_offline_sql(question: str, documents: Iterable[SchemaDocument], dia
         return None
     columns = {column.lower(): column for column in document.column_names}
     if any(term in normalized for term in ("多少", "几条", "数量", "count")):
-        return f"SELECT COUNT(*) AS count FROM {document.table_name}"
+        return f'SELECT COUNT(*) AS "数量" FROM "{document.table_name}"'
     selected = [
         columns[column]
         for column, aliases in _COLUMN_ALIASES.items()
@@ -40,10 +40,11 @@ def generate_offline_sql(question: str, documents: Iterable[SchemaDocument], dia
     ]
     if not selected:
         return None
-    if document.table_name.lower() == "products" and selected == [columns.get("price")] and "name" in columns:
-        selected.insert(0, columns["name"])
-    order_by = f" ORDER BY {columns['id']}" if "id" in columns else ""
-    return f"SELECT {', '.join(selected)} FROM {document.table_name}{order_by}"
+    if document.table_name == "商品" and selected == [columns.get("销售价")] and "商品名称" in columns:
+        selected.insert(0, columns["商品名称"])
+    quoted = [f'"{column}"' for column in selected]
+    order_by = f' ORDER BY "{columns["编号"]}"' if "编号" in columns else ""
+    return f'SELECT {", ".join(quoted)} FROM "{document.table_name}"{order_by}'
 
 
 def _matching_document(question: str, documents: Iterable[SchemaDocument]) -> SchemaDocument | None:

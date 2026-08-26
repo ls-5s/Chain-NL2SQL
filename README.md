@@ -94,7 +94,7 @@ python -m scripts.build_demo_schema_rag
 python -m scripts.seed_demo_knowledge
 ```
 
-三个脚本分别初始化演示数据库、构建确定性的 Schema BM25 索引、导入 `data/knowledge_sources/` 下的业务知识文档。若只验证后端接口，初始化 Demo 数据库即可。
+三个脚本分别初始化演示数据库、构建确定性的 Schema BM25 索引、导入 `data/knowledge_sources/` 下的业务知识文档。Demo 初始化会生成 30 张关联的电商主题表、每表 1,000 条确定性记录；若只验证后端接口，初始化 Demo 数据库即可。
 
 ### 4. 启动后端
 

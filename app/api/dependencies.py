@@ -9,6 +9,7 @@ from fastapi import Request
 
 from app.api.auth import require_authenticated, get_user_repository
 from app.api.authorization import AccessPolicy, local_access_policy
+from app.demo import DEMO_MASKED_COLUMNS
 from app.config.settings import Settings, get_settings
 from app.db.registry import DatabaseRegistry
 
@@ -37,11 +38,11 @@ def get_request_context(request: Request) -> RequestContext:
         policy = AccessPolicy(
             allowed_database_ids=frozenset(item.id for item in registrations),
             allowed_tables_by_database={item.id: registry.allowed_tables(item.id) for item in registrations},
-            # Keep the demo's established column and masking boundaries.
+            # Keep the demo's full schema readable while masking its email field.
             allowed_columns_by_database={
                 "demo": local_access_policy(settings).allowed_columns or {},
             },
-            masked_columns_by_database={"demo": frozenset({"users.email"})},
+            masked_columns_by_database={"demo": DEMO_MASKED_COLUMNS},
         )
     else:
         policy = local_access_policy(settings, database_ids=frozenset())

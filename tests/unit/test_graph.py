@@ -4,6 +4,7 @@ import pytest
 
 from app.api.authorization import AccessPolicy
 from app.db.sqlite_adapter import SQLiteAdapter
+from app.demo import DEMO_TABLES
 from app.graph.builder import SQLiteSchemaRetriever, build_query_graph
 from app.graph.state import create_initial_state
 from app.schemas.domain import QueryIntent
@@ -32,13 +33,8 @@ class UnexpectedRetriever:
 def policy() -> AccessPolicy:
     return AccessPolicy(
         allowed_database_ids=frozenset({"demo"}),
-        allowed_tables=frozenset({"users", "products", "orders", "order_items"}),
-        allowed_columns={
-            "users": frozenset({"id", "name", "email", "created_at"}),
-            "products": frozenset({"id", "name", "category", "price"}),
-            "orders": frozenset({"id", "user_id", "status", "total_amount", "created_at"}),
-            "order_items": frozenset({"id", "order_id", "product_id", "quantity", "unit_price"}),
-        },
+        allowed_tables=DEMO_TABLES,
+        allowed_columns={},
     )
 
 
@@ -55,8 +51,8 @@ def initial_state(question: str):
 def test_data_intent_retrieves_schema_generates_and_executes_sql() -> None:
     adapter = SQLiteAdapter("demo", str(ROOT / "data" / "demo.sqlite"))
     llm = FakeLLM([
-        "SELECT COUNT(*) AS count FROM users",
-        "用户数量为 3。",
+        'SELECT COUNT(*) AS "数量" FROM "用户"',
+        "用户数量为 1000。",
     ])
     graph = build_query_graph(
         database_executor=adapter,
@@ -70,8 +66,8 @@ def test_data_intent_retrieves_schema_generates_and_executes_sql() -> None:
 
     assert state["intent"] == QueryIntent.DATA_QUERY
     assert state["status"] == "succeeded"
-    assert state["query_result"].rows == [[3]]
-    assert state["final_answer"] == "用户数量为 3。"
+    assert state["query_result"].rows == [[1000]]
+    assert state["final_answer"] == "用户数量为 1000。"
     assert len(llm.prompts) == 2
     assert state["answer_source"] == "result_summary"
     assert state["intent_source"] == "rule"
@@ -79,7 +75,7 @@ def test_data_intent_retrieves_schema_generates_and_executes_sql() -> None:
 
 def test_result_summary_failure_keeps_safe_query_result() -> None:
     adapter = SQLiteAdapter("demo", str(ROOT / "data" / "demo.sqlite"))
-    llm = FakeLLM(["SELECT COUNT(*) AS count FROM users", RuntimeError("summary unavailable")])
+    llm = FakeLLM(['SELECT COUNT(*) AS "数量" FROM "用户"', RuntimeError("summary unavailable")])
     graph = build_query_graph(
         database_executor=adapter,
         llm_client=llm,
@@ -91,7 +87,7 @@ def test_result_summary_failure_keeps_safe_query_result() -> None:
     state = graph.invoke(initial_state("查询用户数量"))
 
     assert state["status"] == "succeeded"
-    assert state["query_result"].rows == [[3]]
+    assert state["query_result"].rows == [[1000]]
     assert state["final_answer"] == "查询完成，共返回 1 行结果。"
     assert state["answer_source"] == "deterministic_fallback"
 

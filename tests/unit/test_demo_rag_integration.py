@@ -5,6 +5,7 @@ from pathlib import Path
 from app.api.authorization import AccessPolicy
 from app.conversations.repository import ConversationRepository
 from app.db.sqlite_adapter import SQLiteAdapter
+from app.demo import DEMO_TABLES
 from app.graph.builder import build_query_graph
 from app.graph.state import create_initial_state
 from app.knowledge.service import KnowledgeStore
@@ -18,20 +19,11 @@ from tests.fakes.fake_llm import FakeLLM
 
 
 ROOT = Path(__file__).resolve().parents[2]
-TABLES = frozenset({"users", "products", "orders", "order_items"})
-COLUMNS = {
-    "users": frozenset({"id", "name", "email", "created_at"}),
-    "products": frozenset({"id", "name", "category", "price"}),
-    "orders": frozenset({"id", "user_id", "status", "total_amount", "created_at"}),
-    "order_items": frozenset({"id", "order_id", "product_id", "quantity", "unit_price"}),
-}
-
-
 def _policy() -> AccessPolicy:
     return AccessPolicy(
         allowed_database_ids=frozenset({"demo"}),
-        allowed_tables=TABLES,
-        allowed_columns=COLUMNS,
+        allowed_tables=DEMO_TABLES,
+        allowed_columns={},
     )
 
 
@@ -40,7 +32,7 @@ def test_seeded_demo_database_and_schema_rag_drive_sql(tmp_path: Path) -> None:
     initialize(database_path, ROOT / "data" / "fixtures" / "demo.sql")
     adapter = SQLiteAdapter("demo", str(database_path))
     manager = SchemaIndexManager(adapter.inspect_schema, root=tmp_path / "schema", mode="bm25")
-    llm = FakeLLM("SELECT COUNT(*) AS user_count FROM users")
+    llm = FakeLLM('SELECT COUNT(*) AS "用户数量" FROM "用户"')
     graph = build_query_graph(
         database_executor=adapter,
         llm_client=llm,
@@ -62,8 +54,8 @@ def test_seeded_demo_database_and_schema_rag_drive_sql(tmp_path: Path) -> None:
 
     assert result["status"] == QueryStatus.SUCCEEDED
     assert result["retrieval_mode"] == "bm25"
-    assert "users" in result["retrieved_tables"]
-    assert result["query_result"].rows == [[3]]
+    assert "用户" in result["retrieved_tables"]
+    assert result["query_result"].rows == [[1000]]
     assert "销售额" not in str(llm.prompts[0])
 
 
@@ -75,6 +67,10 @@ def test_seeded_business_knowledge_is_grounded_and_persisted(tmp_path: Path) -> 
         "sales_metrics.md",
         "order_rules.md",
         "demo_dictionary.md",
+        "inventory_rules.md",
+        "payment_fulfillment_rules.md",
+        "marketing_service_rules.md",
+        "loyalty_rules.md",
     }
     store = KnowledgeStore(database_path, knowledge_root, workers=1)
     try:
@@ -83,6 +79,9 @@ def test_seeded_business_knowledge_is_grounded_and_persisted(tmp_path: Path) -> 
         sales_hit = next(item for item in hits if item.title == "sales_metrics.md")
         rules_hits = store.retrieve("待支付订单是否计入销售额", user_id="member-1", role="member")
         assert any(item.title == "order_rules.md" for item in rules_hits)
+        assert any(item.title == "inventory_rules.md" for item in store.retrieve("仓库库存怎么算", user_id="member-1", role="member"))
+        assert any(item.title == "payment_fulfillment_rules.md" for item in store.retrieve("退款完成状态", user_id="member-1", role="member"))
+        assert any(item.title == "loyalty_rules.md" for item in store.retrieve("会员积分流水", user_id="member-1", role="member"))
         assert store.get_acl(sales_hit.document_id)["policy_type"] == "all_authenticated"
 
         answer = f"销售额默认统计已支付订单。[{sales_hit.document_id}]"

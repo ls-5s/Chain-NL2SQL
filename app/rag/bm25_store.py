@@ -13,7 +13,7 @@ from app.schemas.domain import SchemaDocument
 
 
 TOKEN_PATTERN = re.compile(r"[a-z0-9_]+|[\u4e00-\u9fff]", re.IGNORECASE)
-TOKENIZER_VERSION = "aliases-v1"
+TOKENIZER_VERSION = "aliases-v2"
 
 # The SQLite demo has English identifiers but Chinese users.  Expanding both
 # sides with the same aliases keeps the lexical fallback useful without
@@ -29,12 +29,32 @@ ALIAS_GROUPS: tuple[tuple[str, ...], ...] = (
     ("status", "状态", "status"),
     ("created_at", "时间", "日期", "created_at"),
     ("category", "类别", "分类", "category"),
+    ("inventory", "库存", "存货", "可售库存"),
+    ("warehouses", "warehouse", "仓库", "库房"),
+    ("shipments", "shipment", "物流", "发货", "配送", "运单"),
+    ("payments", "payment", "支付", "付款"),
+    ("refunds", "refund", "退款", "退货款"),
+    ("coupons", "coupon", "优惠券", "券"),
+    ("promotions", "promotion", "促销", "活动"),
+    ("returns", "return", "退货", "售后"),
+    ("support_tickets", "ticket", "客服", "工单"),
+    ("loyalty_accounts", "loyalty", "会员", "积分"),
 )
 TABLE_ALIAS_GROUPS = {
-    "users": ALIAS_GROUPS[0],
-    "orders": ALIAS_GROUPS[1],
-    "products": ALIAS_GROUPS[2],
-    "order_items": ALIAS_GROUPS[3],
+    "用户": ALIAS_GROUPS[0],
+    "订单": ALIAS_GROUPS[1],
+    "商品": ALIAS_GROUPS[2],
+    "订单明细": ALIAS_GROUPS[3],
+    "库存": ALIAS_GROUPS[10],
+    "仓库": ALIAS_GROUPS[11],
+    "物流单": ALIAS_GROUPS[12],
+    "支付记录": ALIAS_GROUPS[13],
+    "退款记录": ALIAS_GROUPS[14],
+    "优惠券": ALIAS_GROUPS[15],
+    "促销活动": ALIAS_GROUPS[16],
+    "退货单": ALIAS_GROUPS[17],
+    "客服工单": ALIAS_GROUPS[18],
+    "会员积分账户": ALIAS_GROUPS[19],
 }
 
 
