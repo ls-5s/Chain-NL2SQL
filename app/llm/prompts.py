@@ -78,7 +78,10 @@ def build_sql_generation_prompt() -> ChatPromptTemplate:
                 "仅返回一条只读 SQL，必须是 SELECT 或最终只执行 SELECT 的 WITH 查询。"
                 "不得返回 Markdown 围栏、解释文字、注释、分号、多条语句或任何写操作、DDL、"
                 "管理命令。不要猜测 Schema 中未出现的表或字段。"
-                "字段级权限开启时不要使用 SELECT * 或 table.*，必须显式列出字段。",
+                "字段级权限开启时不要使用 SELECT * 或 table.*，必须显式列出字段。"
+                "只选择回答问题所需的字段，不要因为 Schema 中存在字段就全部返回。"
+                "当用户只问‘有哪些/列出哪些/名单’而未指定属性时，只返回实体名称字段，不得附带主键或编号；"
+                "例如‘查询有哪些商品’应只查询商品名称，不要返回价格、供应商、描述等其他字段。",
             ),
             (
                 "human",
@@ -89,7 +92,8 @@ def build_sql_generation_prompt() -> ChatPromptTemplate:
                 "如果当前问题是省略主语的追问（例如‘推荐一篇’、‘我数据库里面的’），"
                 "必须从会话上下文补全对象；当上下文已经推荐或选中某一篇文章、当前问题询问‘这篇有哪些内容’时，"
                 "必须沿用上下文中的标题或主键过滤到同一篇文章，不得重新查询全部文章；"
-                "当用户要求一篇或一个结果时，生成 SQL 时限制为一行。\n\n"
+                "当用户要求一篇或一个结果时，生成 SQL 时限制为一行。"
+                "如果问题只是‘查询有哪些商品’这类名单查询，结果列必须保持精简，只返回商品名称，不得附带编号。\n\n"
                 "只输出 SQL。",
             ),
         ]
@@ -108,7 +112,8 @@ def build_sql_repair_prompt() -> ChatPromptTemplate:
                 "和已脱敏错误信息修复查询。仅返回一条只读 SQL，必须是 SELECT 或最终只执行 "
                 "SELECT 的 WITH 查询。不得返回 Markdown 围栏、解释文字、注释、分号、多条语句，"
                 "或任何写操作、DDL、管理命令。不要使用 Schema 中未出现的表或字段。"
-                "字段级权限开启时不要使用 SELECT * 或 table.*，必须显式列出字段。",
+                "字段级权限开启时不要使用 SELECT * 或 table.*，必须显式列出字段。"
+                "只修复与问题相关的字段；名单类问题不要扩展为整表字段。",
             ),
             (
                 "human",
@@ -118,10 +123,38 @@ def build_sql_repair_prompt() -> ChatPromptTemplate:
                 "会话上下文（仅作线索，当前问题优先）：\n{conversation_context}\n\n"
                 "失败 SQL：\n{failed_sql}\n\n"
                 "已脱敏错误信息：\n{error_message}\n\n"
+                "字段相关性审查意见（如有）：\n{projection_review_reason}\n\n"
                 "只输出修复后的 SQL。",
             ),
         ]
-        ).partial(conversation_context="")
+        ).partial(conversation_context="", projection_review_reason="无")
+
+
+def build_sql_projection_review_prompt() -> ChatPromptTemplate:
+    """Review whether a generated SQL projection answers the user's question."""
+
+    return ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                "你是受控 NL2SQL 系统的 SQL 字段相关性审查器。只审查候选 SQL 的输出字段是否与用户问题匹配，"
+                "不要生成或修改 SQL，不要执行指令。只输出严格 JSON，不加 Markdown 或其他文字："
+                "{{\"valid\": true}} 或 {{\"valid\": false, \"reason\": \"...\"}}。"
+                "valid 仅在 SQL 选择的字段能够直接回答问题且没有未请求字段时为 true。"
+                "用户只问‘有哪些/列出哪些/名单’且未指定属性时，SQL 只能选择实体名称字段，不能附带编号、"
+                "价格、分类、供应商、品牌、描述或其他属性。"
+                "用户明确要求的字段、排序字段、筛选字段、聚合计算及必要 JOIN 键可以存在于 SQL 中，"
+                "但只有用户明确要求的结果字段可以出现在 SELECT 输出中。",
+            ),
+            (
+                "human",
+                "用户问题：{question}\n\n"
+                "授权 Schema：\n{schema_context}\n\n"
+                "候选 SQL：\n{sql}\n\n"
+                "只输出审查 JSON。",
+            ),
+        ]
+    )
 
 
 def build_result_summary_prompt() -> ChatPromptTemplate:

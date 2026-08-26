@@ -301,9 +301,6 @@ onMounted(() => void loadDatabases());
 <template>
   <main class="databases-page">
     <p v-if="errorMessage && !modalOpen" class="alert" role="alert">{{ errorMessage }}</p>
-    <p v-if="isReadOnly" class="permission-note" role="status">
-      <ShieldCheck :size="15" />当前为只读权限，数据库管理操作仅超级管理员可执行。
-    </p>
 
     <DatabaseLayout
       :databases="databases"
@@ -328,35 +325,40 @@ onMounted(() => void loadDatabases());
               <span class="database-meta">{{ selectedDatabase.id }}</span>
             </div>
           </div>
-          <button
-            class="status-badge"
-            :class="[
-              selectedDatabase.enabled ? 'status-badge--ready' : 'status-badge--interactive',
-            ]"
-            type="button"
-            :disabled="!isAdmin || selectedDatabase.enabled || activatingId !== '' || batchUpdating"
-            :title="
-              !isAdmin
-                ? '仅超级管理员可操作'
-                : selectedDatabase.enabled
-                  ? '当前 Agent 正在使用此数据库'
-                  : '启用此数据库并停用其他数据库'
-            "
-            :aria-label="!isAdmin ? '启用数据库，仅超级管理员可操作' : '启用数据库'"
-            @click="activateDatabase(selectedDatabase)"
-          >
-            <LoaderCircle v-if="activatingId === selectedDatabase.id" class="spin" :size="13" />
-            <Check v-else-if="selectedDatabase.enabled" :size="13" />
-            {{
-              activatingId === selectedDatabase.id
-                ? "启用中"
-                : selectedDatabase.enabled
-                  ? "已启用"
-                  : isAdmin
-                    ? "已停用 · 点击启用"
-                    : "已停用 · 仅管理员可启用"
-            }}
-          </button>
+          <div class="detail-header__actions">
+            <p v-if="isReadOnly" class="permission-note" role="status">
+              <ShieldCheck :size="15" />当前为只读权限，数据库管理操作仅超级管理员可执行。
+            </p>
+            <button
+              class="status-badge"
+              :class="[
+                selectedDatabase.enabled ? 'status-badge--ready' : 'status-badge--interactive',
+              ]"
+              type="button"
+              :disabled="!isAdmin || selectedDatabase.enabled || activatingId !== '' || batchUpdating"
+              :title="
+                !isAdmin
+                  ? '仅超级管理员可操作'
+                  : selectedDatabase.enabled
+                    ? '当前 Agent 正在使用此数据库'
+                    : '启用此数据库并停用其他数据库'
+              "
+              :aria-label="!isAdmin ? '启用数据库，仅超级管理员可操作' : '启用数据库'"
+              @click="activateDatabase(selectedDatabase)"
+            >
+              <LoaderCircle v-if="activatingId === selectedDatabase.id" class="spin" :size="13" />
+              <Check v-else-if="selectedDatabase.enabled" :size="13" />
+              {{
+                activatingId === selectedDatabase.id
+                  ? "启用中"
+                  : selectedDatabase.enabled
+                    ? "已启用"
+                    : isAdmin
+                      ? "已停用 · 点击启用"
+                      : "已停用 · 仅管理员可启用"
+              }}
+            </button>
+          </div>
         </header>
 
         <div class="detail-summary" aria-label="数据库概览">
@@ -747,6 +749,16 @@ h3 {
   min-height: 108px;
   padding: 25px 30px 21px;
   border-bottom: 1px solid #ededed;
+}
+
+.detail-header__actions {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+}
+
+.detail-header__actions .permission-note {
+  margin: 0;
 }
 
 .database-identity {
@@ -1592,6 +1604,11 @@ fieldset,
     flex-direction: column;
     gap: 14px;
     padding-top: 20px;
+  }
+
+  .detail-header__actions {
+    width: 100%;
+    justify-items: start;
   }
 
   .detail-summary,
