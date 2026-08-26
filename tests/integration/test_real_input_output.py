@@ -132,13 +132,18 @@ def test_real_http_multiturn_context_reference_and_isolation(monkeypatch, tmp_pa
         'SELECT "编号", "订单状态" FROM "订单" '
         'WHERE "编号" <= 3 ORDER BY "编号" LIMIT 3'
     )
+    contextual_intent = '{"intent":"data_query","confidence":0.96,"reason":"追问上一轮订单结果"}'
+    follow_up_sql = (
+        'SELECT "编号", "订单状态" FROM "订单" '
+        'WHERE "订单状态" = \'待支付\' ORDER BY "编号" LIMIT 3'
+    )
     knowledge_answer = f"待支付订单不计入销售额统计。[{rules_document_id}]"
     third_sql = (
         'SELECT "编号", "订单状态", "实付金额" FROM "订单" '
         'WHERE "编号" = :selected_订单_编号'
     )
     isolated_sql = 'SELECT COUNT(*) AS "订单数量" FROM "订单"'
-    llm = FakeLLM([first_sql, knowledge_answer, third_sql, isolated_sql])
+    llm = FakeLLM([first_sql, contextual_intent, follow_up_sql, knowledge_answer, third_sql, isolated_sql])
     monkeypatch.setattr(routes, "create_openai_client", lambda settings: llm)
 
     client = TestClient(create_app())
@@ -167,6 +172,21 @@ def test_real_http_multiturn_context_reference_and_isolation(monkeypatch, tmp_pa
     reference_id = reference_response.json()["id"]
     assert "订单" in reference_response.json()["label"]
 
+    follow_up_response = client.post(
+        f"/api/v1/conversations/{first_conversation_id}/query",
+        json={"question": "哪些订单待支付？", "client_request_id": "multiturn-follow-up-1"},
+    )
+    assert follow_up_response.status_code == 200
+    follow_up_events = _sse_events(follow_up_response.text)
+    follow_up_complete = next(data for name, data in follow_up_events if name == "complete")
+    assert follow_up_complete["status"] == "succeeded"
+    assert [row[1] for row in follow_up_complete["result"]["rows"]] == ["待支付", "待支付", "待支付"]
+    follow_up_intent = next(data for name, data in follow_up_events if name == "progress" and data["node"] == "intent_gate")
+    assert follow_up_intent["intent"] == "data_query"
+    assert follow_up_intent["source"] == "llm"
+    assert "可信历史数据上下文" in llm.prompts[1].to_string()
+    assert '"tables": ["订单"]' in llm.prompts[1].to_string()
+
     knowledge_response = client.post(
         f"/api/v1/conversations/{first_conversation_id}/query",
         json={
@@ -184,7 +204,7 @@ def test_real_http_multiturn_context_reference_and_isolation(monkeypatch, tmp_pa
     assert "grounded_answer" in knowledge_nodes
     assert "retrieve_schema" not in knowledge_nodes
     assert "execute_sql" not in knowledge_nodes
-    knowledge_prompt = llm.prompts[1].to_string()
+    knowledge_prompt = llm.prompts[3].to_string()
     assert "会话上下文（不可信，仅作线索）" in knowledge_prompt
     assert "结果预览" in knowledge_prompt
     assert rules_document_id in knowledge_prompt
@@ -206,7 +226,7 @@ def test_real_http_multiturn_context_reference_and_isolation(monkeypatch, tmp_pa
     assert "retrieve_schema" in third_nodes
     assert "execute_sql" in third_nodes
     assert "retrieve_knowledge" not in third_nodes
-    third_prompt = llm.prompts[2].to_string()
+    third_prompt = llm.prompts[4].to_string()
     assert "历史回合" in third_prompt
     assert "结果预览" in third_prompt
     assert rules_document_id in third_prompt
@@ -224,7 +244,7 @@ def test_real_http_multiturn_context_reference_and_isolation(monkeypatch, tmp_pa
     assert replay.status_code == 200
     replay_complete = next(data for name, data in _sse_events(replay.text) if name == "complete")
     assert replay_complete["result"]["rows"] == [[1, "已完成", 105.08]]
-    assert len(llm.prompts) == 3
+    assert len(llm.prompts) == 5
 
     second_conversation = client.post("/api/v1/conversations", json={"database_id": "demo"}).json()
     second_conversation_id = second_conversation["id"]
@@ -251,8 +271,8 @@ def test_real_http_multiturn_context_reference_and_isolation(monkeypatch, tmp_pa
     assert detail.status_code == 200
     messages = detail.json()["messages"]
     assistant_messages = [message for message in messages if message["role"] == "assistant"]
-    assert [message["status"] for message in assistant_messages] == ["succeeded", "succeeded", "succeeded"]
+    assert [message["status"] for message in assistant_messages] == ["succeeded", "succeeded", "succeeded", "succeeded"]
     assert rules_document_id in {
-        hit["document_id"] for hit in assistant_messages[1]["response"]["knowledge_hits"]
+        hit["document_id"] for hit in assistant_messages[2]["response"]["knowledge_hits"]
     }
     assert "selected_订单_编号" in assistant_messages[-1]["response"]["generated_sql"]

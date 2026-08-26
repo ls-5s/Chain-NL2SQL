@@ -34,15 +34,22 @@ def test_persists_turn_context_reference_and_cascade_delete(tmp_path) -> None:
     assert [message["role"] for message in detail["messages"]] == ["user", "assistant"]
     assert detail["messages"][-1]["progress"][0]["node"] == "generate_sql"
 
-    context, bindings = repository.build_context("single-user", first["id"], "继续查用户", 6000)
+    context, bindings, data_context = repository.build_context("single-user", first["id"], "继续查用户", 6000)
     assert "查询用户" in context
     assert bindings == {}
-    other_context, _ = repository.build_context("single-user", second["id"], "继续查用户", 6000)
+    assert data_context == {
+        "selection_source": "recent_history",
+        "candidates": [{"turn_id": first_turn["turn_id"], "tables": ["用户"], "columns": ["编号", "用户名称"], "row_count": 1}],
+    }
+    other_context, _, other_data_context = repository.build_context("single-user", second["id"], "继续查用户", 6000)
     assert "查询用户" not in other_context
+    assert other_data_context == {"selection_source": "none", "candidates": []}
 
     reference = repository.create_result_reference("single-user", first["id"], first_turn["turn_id"], 0)
-    _, bindings = repository.build_context("single-user", first["id"], "查看该用户", 6000, [reference["id"]])
+    _, bindings, referenced_data_context = repository.build_context("single-user", first["id"], "查看该用户", 6000, [reference["id"]])
     assert bindings == {"selected_用户_编号": 7}
+    assert referenced_data_context["selection_source"] == "explicit_reference"
+    assert referenced_data_context["candidates"][0]["turn_id"] == first_turn["turn_id"]
 
     repository.delete_conversation("single-user", first["id"])
     assert [item["id"] for item in repository.list_conversations("single-user")] == [second["id"]]
@@ -56,7 +63,7 @@ def test_context_uses_fts_and_turn_creation_is_concurrent_safe(tmp_path) -> None
         turn = repository.start_turn("single-user", conversation["id"], question, "")
         repository.finish_turn(turn["turn_id"], turn["assistant_message_id"], response())
 
-    context, _ = repository.build_context("single-user", conversation["id"], "继续按订单状态查询", 220)
+    context, _, _ = repository.build_context("single-user", conversation["id"], "继续按订单状态查询", 220)
     assert len(context) <= 220
     assert "订单状态" in context
 

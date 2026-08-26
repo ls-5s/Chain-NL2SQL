@@ -258,6 +258,83 @@ def test_ambiguous_question_returns_clarification_without_database_access() -> N
     assert state["intent_source"] == "rule"
 
 
+def test_contextual_follow_up_uses_llm_intent_and_queries_the_previous_object() -> None:
+    adapter = SQLiteAdapter("demo", str(ROOT / "data" / "demo.sqlite"))
+    llm = FakeLLM(
+        [
+            '{"intent":"data_query","confidence":0.96,"reason":"追问上一轮商品结果的价格"}',
+            'SELECT "商品名称", "销售价" FROM "商品" ORDER BY "销售价" ASC LIMIT 3',
+            '{"valid": true}',
+        ]
+    )
+    graph = build_query_graph(
+        database_executor=adapter,
+        llm_client=llm,
+        schema_retriever=SQLiteSchemaRetriever(adapter),
+        access_policy=policy(),
+        query_timeout_seconds=15,
+        result_summary_enabled=False,
+    )
+    state = graph.invoke(
+        create_initial_state(
+            request_id="contextual-product-follow-up",
+            question="有什么便宜的吗？",
+            database_id="demo",
+            dialect="sqlite",
+            max_iterations=1,
+            conversation_context="历史回合：查询有哪些商品\n涉及表：商品\n结果预览：不可信结果数据",
+            conversation_data_context={
+                "selection_source": "recent_history",
+                "candidates": [
+                    {"turn_id": "products-turn", "tables": ["商品"], "columns": ["商品名称"], "row_count": 100}
+                ],
+            },
+        )
+    )
+
+    assert state["intent"] == QueryIntent.DATA_QUERY
+    assert state["intent_source"] == "llm"
+    assert state["status"] == "succeeded"
+    assert state["query_result"].columns == ["商品名称", "销售价"]
+    assert '"tables": ["商品"]' in llm.prompts[0].to_string()
+
+
+def test_contextual_unrelated_question_stays_general_without_database_access() -> None:
+    llm = FakeLLM(
+        [
+            '{"intent":"general_chat","confidence":0.98,"reason":"电影推荐不需要本地业务数据"}',
+            "可以考虑观看一部科幻电影。",
+        ]
+    )
+    graph = build_query_graph(
+        database_executor=UnexpectedDatabaseAccess(),
+        llm_client=llm,
+        schema_retriever=UnexpectedRetriever(),
+        access_policy=policy(),
+        query_timeout_seconds=15,
+    )
+    state = graph.invoke(
+        create_initial_state(
+            request_id="contextual-general-chat",
+            question="推荐一部电影",
+            database_id="demo",
+            dialect="sqlite",
+            max_iterations=1,
+            conversation_data_context={
+                "selection_source": "recent_history",
+                "candidates": [
+                    {"turn_id": "products-turn", "tables": ["商品"], "columns": ["商品名称"], "row_count": 100}
+                ],
+            },
+        )
+    )
+
+    assert state["intent"] == QueryIntent.GENERAL_CHAT
+    assert state["status"] == "succeeded"
+    assert state["final_answer"] == "可以考虑观看一部科幻电影。"
+    assert len(llm.prompts) == 2
+
+
 def test_invalid_intent_json_returns_clarification_without_database_access() -> None:
     llm = FakeLLM(["这看起来像数据问题"])
     graph = build_query_graph(

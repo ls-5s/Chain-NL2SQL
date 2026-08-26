@@ -526,7 +526,7 @@ async def conversation_query(
     settings = get_settings()
     repository = _conversation_repository(settings)
     try:
-        conversation_context, bindings = repository.build_context(
+        conversation_context, bindings, conversation_data_context = repository.build_context(
             context.user_id, conversation_id, payload.question, settings.conversation_context_max_chars, payload.reference_ids
         )
         turn = repository.start_turn(context.user_id, conversation_id, payload.question, conversation_context, payload.client_request_id)
@@ -588,6 +588,7 @@ async def conversation_query(
             dialect=dialect,
             max_iterations=payload.max_iterations or settings.max_iterations,
             conversation_context=conversation_context,
+            conversation_data_context=conversation_data_context,
             bound_parameters=bindings,
         )
     except Exception as error:

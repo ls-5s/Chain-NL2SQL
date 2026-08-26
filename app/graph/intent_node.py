@@ -20,76 +20,79 @@ def make_intent_gate_node(llm_client: LLMClient, timeout_seconds: float, confide
         if state.get("intent") is not None:
             return {"intent": state["intent"]}
         rule_decision = classify_by_rules(state["question"])
-        context_follow_up = _is_database_follow_up(state["question"], state.get("conversation_context", ""))
-        if context_follow_up:
-            # Elliptical follow-ups such as "推荐一篇" are data requests when
-            # the current conversation already contains an article result.
-            return {
-                "intent": QueryIntent.DATA_QUERY,
-                "intent_confidence": 0.93,
-                "intent_reason": "结合当前会话中的数据库结果理解省略主语或指代",
-                "intent_source": "conversation_context",
-                "intent_classification_valid": True,
-            }
-        if rule_decision is not None:
-            result = {
-                "intent": rule_decision.intent,
-                "intent_confidence": rule_decision.confidence,
-                "intent_reason": rule_decision.reason,
-                "intent_source": "rule",
-                "intent_classification_valid": True,
-            }
-            if any(term in state["question"] for term in ("内部资料", "公司制度", "内部知识", "政策文档", "知识库")):
-                result["knowledge_policy"] = "required"
-            return result
+        if rule_decision is not None and _requires_knowledge_retrieval(state["question"]):
+            return _rule_result(state["question"], rule_decision)
+        if rule_decision is not None and rule_decision.intent == QueryIntent.DATA_QUERY:
+            return _rule_result(state["question"], rule_decision)
+        if rule_decision is not None and not _has_data_candidates(state.get("conversation_data_context")):
+            return _rule_result(state["question"], rule_decision)
         response = llm_client.generate(
-            prompt_template.invoke({"question": state["question"], "conversation_context": state.get("conversation_context", "")}),
+            prompt_template.invoke(
+                {
+                    "question": state["question"],
+                    "conversation_context": state.get("conversation_context", ""),
+                    "conversation_data_context": json.dumps(
+                        state.get("conversation_data_context", {"candidates": []}),
+                        ensure_ascii=False,
+                        default=str,
+                    ),
+                }
+            ),
             timeout_seconds=timeout_seconds,
         )
         parsed = _parse_intent(response.content)
         if parsed is None or parsed["confidence"] < confidence_threshold:
-            result = {
-                "intent": QueryIntent.CLARIFY,
-                "intent_confidence": parsed["confidence"] if parsed else 0.0,
-                "intent_reason": "LLM 分类置信度不足或输出格式无效",
-                "intent_source": "llm",
-                "intent_classification_valid": False,
-            }
-            if any(term in state["question"] for term in ("内部资料", "公司制度", "内部知识", "政策文档", "知识库")):
-                result["knowledge_policy"] = "required"
-            return result
-        result = {
-            "intent": parsed["intent"],
-            "intent_confidence": parsed["confidence"],
-            "intent_reason": parsed["reason"],
-            "intent_source": "llm",
-            "intent_classification_valid": True,
-        }
-        if any(term in state["question"] for term in ("内部资料", "公司制度", "内部知识", "政策文档", "知识库")):
-            result["knowledge_policy"] = "required"
-        return result
+            return _llm_result(
+                state["question"],
+                QueryIntent.CLARIFY,
+                parsed["confidence"] if parsed else 0.0,
+                "LLM 分类置信度不足或输出格式无效",
+                False,
+            )
+        return _llm_result(
+            state["question"], parsed["intent"], parsed["confidence"], parsed["reason"], True
+        )
 
     return classify
 
 
-def _is_database_follow_up(question: str, conversation_context: str) -> bool:
-    """Recognize short follow-ups that refer to a previous database result."""
+def _rule_result(question: str, decision: Any) -> dict[str, object]:
+    result: dict[str, object] = {
+        "intent": decision.intent,
+        "intent_confidence": decision.confidence,
+        "intent_reason": decision.reason,
+        "intent_source": "rule",
+        "intent_classification_valid": True,
+    }
+    if _requires_knowledge_retrieval(question):
+        result["knowledge_policy"] = "required"
+    return result
 
-    if not conversation_context or not question.strip():
+
+def _llm_result(
+    question: str, intent: QueryIntent, confidence: float, reason: str, valid: bool
+) -> dict[str, object]:
+    result: dict[str, object] = {
+        "intent": intent,
+        "intent_confidence": confidence,
+        "intent_reason": reason,
+        "intent_source": "llm",
+        "intent_classification_valid": valid,
+    }
+    if _requires_knowledge_retrieval(question):
+        result["knowledge_policy"] = "required"
+    return result
+
+
+def _requires_knowledge_retrieval(question: str) -> bool:
+    return any(term in question for term in ("内部资料", "公司制度", "内部知识", "政策文档", "知识库"))
+
+
+def _has_data_candidates(data_context: object) -> bool:
+    if not isinstance(data_context, dict):
         return False
-    normalized = " ".join(question.strip().split()).lower()
-    # Do not reinterpret explicit meta questions about the chat itself.
-    if any(pattern in normalized for pattern in ("上一个问题是什么", "刚才问了什么", "之前问了什么")):
-        return False
-    has_follow_up_language = any(
-        marker in normalized
-        for marker in (
-            "推荐", "一篇", "一个", "这篇", "这类", "这些", "刚才", "继续",
-            "数据库里面", "数据库里的", "有哪些内容", "有那些内容", "讲了什么", "正文", "详细内容",
-        )
-    )
-    has_article_result = any(marker in conversation_context.lower() for marker in ("articles", "文章", "generated_sql"))
-    return has_follow_up_language and has_article_result
+    candidates = data_context.get("candidates")
+    return isinstance(candidates, list) and bool(candidates)
 
 
 def _parse_intent(content: str) -> dict[str, Any] | None:

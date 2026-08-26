@@ -2,7 +2,6 @@ import json
 
 from app.graph.result_summary_node import _fallback, _serialize_result
 from app.api.response_mapper import map_query_state
-from app.graph.intent_node import _is_database_follow_up
 from app.schemas.domain import QueryIntent, QueryResult, QueryStatus
 
 
@@ -88,10 +87,3 @@ def test_summary_response_does_not_expose_raw_result_rows() -> None:
     )
 
     assert response.result is None
-
-
-def test_article_content_follow_up_keeps_the_selected_record_context() -> None:
-    context = "历史回合：推荐这篇：面试官：说说JavaScript中的数据类型？存储上的差别？\n涉及表：articles"
-
-    assert _is_database_follow_up("有哪些内容", context)
-    assert not _is_database_follow_up("为什么是这个", context)

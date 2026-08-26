@@ -19,6 +19,7 @@ class NL2SQLState(TypedDict):
     trace: list[TraceEvent]
     status: QueryStatus
     conversation_context: NotRequired[str]
+    conversation_data_context: NotRequired[dict[str, object]]
     bound_parameters: NotRequired[dict[str, object]]
     knowledge_policy: NotRequired[str]
     clarification_fields: NotRequired[list[str]]
@@ -59,6 +60,7 @@ def create_initial_state(
     dialect: str = "",
     max_iterations: int,
     conversation_context: str = "",
+    conversation_data_context: dict[str, object] | None = None,
     bound_parameters: dict[str, object] | None = None,
     knowledge_policy: str = "none",
 ) -> NL2SQLState:
@@ -73,6 +75,7 @@ def create_initial_state(
         "trace": [],
         "status": QueryStatus.RUNNING,
         "conversation_context": conversation_context,
+        "conversation_data_context": conversation_data_context or {"candidates": []},
         "bound_parameters": bound_parameters or {},
         "knowledge_policy": knowledge_policy,
     }
