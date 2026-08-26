@@ -15,6 +15,7 @@ REPAIRABLE_ERRORS = frozenset({
     "unknown_table",
     "join_error",
     "aggregation_error",
+    "projection_mismatch",
 })
 
 
@@ -38,6 +39,7 @@ def make_repair_node(llm_client: LLMClient, timeout_seconds: float):
                     "conversation_context": state.get("conversation_context", ""),
                     "failed_sql": state.get("generated_sql", ""),
                     "error_message": state.get("safe_error", ""),
+                    "projection_review_reason": state.get("projection_review_reason") or "无",
                 }
             ),
             timeout_seconds=timeout_seconds,
@@ -57,6 +59,7 @@ def make_repair_node(llm_client: LLMClient, timeout_seconds: float):
             "iteration": state["iteration"] + 1,
             "error_category": None,
             "safe_error": None,
+            "projection_review_reason": None,
             "trace": state.get("trace", [])
             + [TraceEvent(node="repair_sql", iteration=state["iteration"], error_category=category_value)],
         }

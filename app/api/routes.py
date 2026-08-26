@@ -914,6 +914,7 @@ def _node_message(node: str) -> str:
         "retrieve_knowledge": "正在检索知识资料",
         "intent_gate": "正在理解问题并判断处理方式",
         "retrieve_schema": "正在读取数据库 Schema",
+        "review_sql_projection": "正在检查 SQL 是否与问题匹配",
         "generate_sql": "正在生成只读 SQL",
         "repair_sql": "正在根据执行错误修复 SQL",
         "validate_sql": "正在校验 SQL 安全性",
@@ -944,6 +945,10 @@ def _node_explanation(node: str, state: dict[str, Any]) -> str:
         if state.get("retrieval_mode") == "authorized_full_schema":
             return f"关键词检索未命中，已使用服务端允许访问的全部 Schema，共获得 {count} 张表的结构信息。"
         return f"读取服务端允许访问的 Schema，共获得 {count} 张表的结构信息。"
+    if node == "review_sql_projection":
+        if state.get("error_category") == "projection_mismatch":
+            return "SQL 返回了问题未要求的字段，正在要求 Agent 精简查询。"
+        return "根据用户问题、候选 SQL 和授权 Schema 检查返回字段是否必要。"
     if node == "retrieve_knowledge":
         count = len(state.get("knowledge_hits", []))
         if state.get("knowledge_retrieval_error"):

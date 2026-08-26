@@ -15,6 +15,7 @@ from app.graph.general_answer_node import make_general_answer_node
 from app.graph.grounded_answer_node import make_grounded_answer_node
 from app.graph.generation_node import make_generation_node
 from app.graph.intent_node import make_intent_gate_node
+from app.graph.projection_review_node import make_projection_review_node
 from app.graph.state import NL2SQLState
 from app.graph.validation_node import make_validation_node
 from app.graph.repair_node import REPAIRABLE_ERRORS, make_repair_node
@@ -45,6 +46,7 @@ def build_query_graph(
     graph.add_node("intent_gate", make_intent_gate_node(llm_client, model_timeout_seconds, intent_confidence_threshold))
     graph.add_node("retrieve_schema", _retrieve_schema_node(schema_retriever, access_policy))
     graph.add_node("generate_sql", make_generation_node(llm_client, model_timeout_seconds))
+    graph.add_node("review_sql_projection", make_projection_review_node(llm_client, model_timeout_seconds))
     graph.add_node("validate_sql", make_validation_node(access_policy))
     graph.add_node("execute_sql", make_execution_node(database_executor, access_policy, query_timeout_seconds))
     graph.add_node("result_guard", make_result_guard_node(access_policy, result_row_limit))
@@ -82,7 +84,12 @@ def build_query_graph(
         _route_after_retrieval,
         {"running": "generate_sql", "failed": "finalize", "blocked": "finalize"},
     )
-    graph.add_edge("generate_sql", "validate_sql")
+    graph.add_edge("generate_sql", "review_sql_projection")
+    graph.add_conditional_edges(
+        "review_sql_projection",
+        _route_after_projection_review,
+        {"validate": "validate_sql", "repair": "repair_sql", "finalize": "finalize"},
+    )
     graph.add_edge("validate_sql", "execute_sql")
     graph.add_conditional_edges(
         "execute_sql",
@@ -95,7 +102,7 @@ def build_query_graph(
         {"summarize_result": "summarize_result", "finalize": "finalize"},
     )
     graph.add_edge("summarize_result", "finalize")
-    graph.add_edge("repair_sql", "validate_sql")
+    graph.add_edge("repair_sql", "review_sql_projection")
     graph.add_edge("general_answer", "finalize")
     graph.add_edge("retrieve_knowledge", "grounded_answer")
     graph.add_edge("grounded_answer", "finalize")
@@ -158,6 +165,22 @@ def _route_after_execution(state: NL2SQLState) -> str:
         return "repair"
     if status_value == QueryStatus.SUCCEEDED.value:
         return "result_guard"
+    return "finalize"
+
+
+def _route_after_projection_review(state: NL2SQLState) -> str:
+    status = state.get("status", QueryStatus.FAILED)
+    status_value = status.value if isinstance(status, QueryStatus) else str(status)
+    category = state.get("error_category")
+    category_value = category.value if hasattr(category, "value") else category
+    if status_value == QueryStatus.RUNNING.value:
+        return "validate"
+    if (
+        status_value == QueryStatus.FAILED.value
+        and category_value in REPAIRABLE_ERRORS
+        and state.get("iteration", 0) < state.get("max_iterations", 0)
+    ):
+        return "repair"
     return "finalize"
 
 

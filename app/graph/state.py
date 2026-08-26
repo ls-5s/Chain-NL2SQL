@@ -38,6 +38,7 @@ class NL2SQLState(TypedDict):
     retrieval_scores: NotRequired[dict[str, float]]
     retrieved_tables: NotRequired[list[str]]
     generated_sql: NotRequired[str]
+    projection_review_reason: NotRequired[str | None]
     validated_sql: NotRequired[str]
     query_result: NotRequired[QueryResult | None]
     raw_error: NotRequired[str | None]

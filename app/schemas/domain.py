@@ -43,6 +43,7 @@ class ErrorCategory(str, Enum):
     UNKNOWN_TABLE = "unknown_table"
     JOIN_ERROR = "join_error"
     AGGREGATION_ERROR = "aggregation_error"
+    PROJECTION_MISMATCH = "projection_mismatch"
     INVALID_MODEL_OUTPUT = "invalid_model_output"
     PERMISSION_ERROR = "permission_error"
     CONNECTION_ERROR = "connection_error"
