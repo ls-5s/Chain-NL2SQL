@@ -1,0 +1,6 @@
+INFO:     127.0.0.1:51934 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60388 - "POST /api/v1/conversations/5c0369a2-3e97-4f46-abc4-a6518efdabec/query HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51883 - "GET /api/v1/auth/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51884 - "GET /api/v1/conversations HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51885 - "GET /api/v1/databases HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63076 - "GET /api/v1/conversations/5c0369a2-3e97-4f46-abc4-a6518efdabec HTTP/1.1" 200 OK

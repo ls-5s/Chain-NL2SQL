@@ -1,0 +1,5 @@
+INFO:     Started server process [36948]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8002 (Press CTRL+C to quit)
+Agent request failed request_id=5e066d4d-8d75-4ef3-ac13-1b8d1926ac49 conversation_id=a0e265f3-c363-4289-bba0-20a719e9317c turn_id=561bb1ab-83db-4782-8c27-b0a17d7d3427 node=retrieve_schema exception_type=APIConnectionError provider_status=- cancelled=False detail=Connection error.
