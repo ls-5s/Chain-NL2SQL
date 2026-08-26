@@ -76,8 +76,23 @@ class SchemaIndexManager:
                 with FileLock(str(lock_path), timeout=60):
                     manifest = self._ensure_index(index_path, documents, full.schema_version, request.dialect, scope_hash)
             except SchemaRetrievalError:
-                raise
-            except (OSError, ValueError, KeyError, TypeError, RuntimeError) as error:
+                if self.fallback_mode != "bm25":
+                    raise
+                # The database schema has already been read and ACL-filtered.
+                # If the optional persistent index cannot be opened or built,
+                # keep the query usable with the authorized metadata directly.
+                return SchemaRetrieval(
+                    documents=documents,
+                    schema_version=full.schema_version,
+                    retrieval_mode="authorized_full_schema",
+                )
+            except Exception as error:
+                if self.fallback_mode == "bm25":
+                    return SchemaRetrieval(
+                        documents=documents,
+                        schema_version=full.schema_version,
+                        retrieval_mode="authorized_full_schema",
+                    )
                 raise SchemaRetrievalError("Schema index is unavailable.") from error
             try:
                 bm25 = BM25Store.load(index_path) if manifest["bm25_available"] else None

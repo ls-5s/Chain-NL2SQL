@@ -18,7 +18,13 @@ def make_grounded_answer_node(llm_client: LLMClient, timeout_seconds: float):
         evidence = [{"document_id": hit.document_id, "title": hit.title, "excerpt": hit.excerpt} for hit in hits]
         try:
             answer_text = llm_client.generate(
-                prompt.invoke({"question": state["question"], "evidence_json": json.dumps(evidence, ensure_ascii=False)}),
+                prompt.invoke(
+                    {
+                        "question": state["question"],
+                        "conversation_context": state.get("conversation_context", ""),
+                        "evidence_json": json.dumps(evidence, ensure_ascii=False),
+                    }
+                ),
                 timeout_seconds=timeout_seconds,
             ).content.strip()
         except Exception:

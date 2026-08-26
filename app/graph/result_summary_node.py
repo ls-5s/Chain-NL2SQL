@@ -31,7 +31,10 @@ def make_result_summary_node(
             "trace": state.get("trace", [])
             + [TraceEvent(node="summarize_result", iteration=state["iteration"])],
         }
-        if state.get("status") != QueryStatus.SUCCEEDED or result is None or not enabled:
+        # A truncated result is not a complete basis for a row-by-row model
+        # summary. Use the deterministic count message so the answer cannot
+        # describe a smaller sample as if it were the displayed result set.
+        if state.get("status") != QueryStatus.SUCCEEDED or result is None or not enabled or result.truncated:
             return base
         try:
             if max_chars <= 0:
@@ -98,18 +101,47 @@ def _serialize_result(result: QueryResult, max_chars: int | None = None) -> str:
     serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=_json_default)
     if max_chars is None or len(serialized) <= max_chars:
         return serialized
-    # Keep every row represented, but shorten long article/body cells so the
-    # summarizer can still describe all returned records within its budget.
-    for cell_chars in (700, 400, 220, 100, 40, 0):
+    # First preserve the complete row set while shortening long text fields.
+    # This keeps summaries useful for normal-sized results and still lets the
+    # model see real values instead of empty placeholders.
+    for cell_chars in (700, 400, 220, 100, 40):
         compact_rows = [[_clean_text(value)[:cell_chars] for value in row] for row in result.rows]
         compact = {**payload, "rows": compact_rows}
         serialized = json.dumps(compact, ensure_ascii=False, separators=(",", ":"), default=_json_default)
         if len(serialized) <= max_chars:
             return serialized
+
+    # Very wide result sets need a bounded sample. Keep the first rows and
+    # explicitly tell the summarizer how many rows were omitted.
+    row_limits = [len(result.rows)]
+    while row_limits[-1] > 1:
+        next_limit = max(1, row_limits[-1] // 2)
+        if next_limit == row_limits[-1]:
+            break
+        row_limits.append(next_limit)
+    for row_limit in row_limits[1:]:
+        for cell_chars in (220, 100, 40, 20):
+            compact_rows = [[_clean_text(value)[:cell_chars] for value in row] for row in result.rows[:row_limit]]
+            compact = {
+                **payload,
+                "rows": compact_rows,
+                "rows_shown": row_limit,
+                "rows_omitted": max(0, len(result.rows) - row_limit),
+            }
+            serialized = json.dumps(compact, ensure_ascii=False, separators=(",", ":"), default=_json_default)
+            if len(serialized) <= max_chars:
+                return serialized
     # The column names and row count are still valid JSON even for an
     # unusually wide result set that cannot fit the configured budget.
     return json.dumps(
-        {"columns": result.columns, "rows": [], "row_count": result.row_count, "truncated": True},
+        {
+            "columns": result.columns,
+            "rows": [],
+            "row_count": result.row_count,
+            "truncated": True,
+            "rows_shown": 0,
+            "rows_omitted": len(result.rows),
+        },
         ensure_ascii=False,
         separators=(",", ":"),
     )

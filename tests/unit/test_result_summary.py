@@ -33,6 +33,46 @@ def test_long_result_is_compacted_as_valid_json_for_summary() -> None:
     assert len(json.dumps(payload, ensure_ascii=False)) <= 12_000
 
 
+def test_wide_result_keeps_real_values_when_sampling_for_summary() -> None:
+    result = QueryResult(
+        columns=[f"column_{index}" for index in range(18)],
+        rows=[[f"value-{row}-{column}" for column in range(18)] for row in range(100)],
+        row_count=100,
+        truncated=True,
+    )
+
+    payload = json.loads(_serialize_result(result, 12_000))
+
+    assert len(payload["rows"]) < 100
+    assert payload["rows"][0][0] == "value-0-0"
+    assert payload["rows_omitted"] > 0
+
+
+def test_truncated_result_uses_deterministic_summary() -> None:
+    class UnexpectedLLM:
+        def generate(self, *args, **kwargs):
+            raise AssertionError("truncated results must not be sent to the summarizer")
+
+    from app.graph.result_summary_node import make_result_summary_node
+
+    summarize = make_result_summary_node(UnexpectedLLM(), timeout_seconds=1, enabled=True)
+    state = summarize(
+        {
+            "status": QueryStatus.SUCCEEDED,
+            "iteration": 1,
+            "question": "查询有哪些商品",
+            "query_result": QueryResult(
+                columns=["商品名称"], rows=[["显示器 0001"]], row_count=100, truncated=True
+            ),
+            "trace": [],
+        }
+    )
+
+    assert state["answer_source"] == "deterministic_fallback"
+    assert "100" in state["final_answer"]
+    assert "截断" in state["final_answer"]
+
+
 def test_summary_response_does_not_expose_raw_result_rows() -> None:
     response = map_query_state(
         {

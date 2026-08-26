@@ -418,6 +418,21 @@ def test_reranker_failure_recomputes_bm25(tmp_path: Path) -> None:
     assert result.documents[0].table_name == "用户"
 
 
+def test_index_failure_falls_back_to_authorized_schema(tmp_path: Path) -> None:
+    manager = SchemaIndexManager(retrieval_source, root=tmp_path, mode="hybrid", fallback_mode="bm25")
+
+    def unavailable_index(*args, **kwargs):
+        raise RuntimeError("index unavailable")
+
+    manager._ensure_index = unavailable_index  # type: ignore[method-assign]
+    result = manager.retrieve(
+        SchemaRetrievalRequest("查询用户", "demo", "sqlite", frozenset({"用户"}), {})
+    )
+
+    assert result.retrieval_mode == "authorized_full_schema"
+    assert [document.table_name for document in result.documents] == ["用户"]
+
+
 def test_vector_index_with_injected_embedding(tmp_path: Path) -> None:
     class FakeEmbedding:
         model_name = "fake-embedding"

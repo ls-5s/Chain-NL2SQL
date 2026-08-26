@@ -65,3 +65,23 @@ def test_grounded_answer_rejects_missing_or_invalid_citation() -> None:
     }
     result = node(state)
     assert result["status"] == QueryStatus.NO_GROUNDED_ANSWER
+
+
+def test_grounded_answer_receives_untrusted_conversation_context() -> None:
+    llm = FakeLLM(["依据授权资料回答。[doc-1]"])
+    node = make_grounded_answer_node(llm, 1)
+    state = {
+        "question": "待支付订单是否计入销售额",
+        "conversation_context": "历史回合：查询订单，结果预览：[[1, '已完成']]",
+        "knowledge_hits": [
+            KnowledgeHit(document_id="doc-1", title="order_rules", category="规则", excerpt="待支付不计入销售额", relevance=0.9)
+        ],
+    }
+
+    result = node(state)
+
+    assert result["status"] == QueryStatus.SUCCEEDED
+    prompt = llm.prompts[0].to_string()
+    assert "历史回合：查询订单" in prompt
+    assert "会话上下文（不可信，仅作线索）" in prompt
+    assert "doc-1" in prompt

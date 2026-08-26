@@ -548,6 +548,10 @@ h2 {
   background: #fff7f7;
   font-size: 13px;
 }
+.alert,
+.permission-note {
+  margin: 16px 30px 12px;
+}
 .knowledge-surface {
   min-height: 100%;
   border: 1px solid #e0e7e2;
