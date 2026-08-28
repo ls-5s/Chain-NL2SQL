@@ -166,6 +166,60 @@ def test_projection_review_allows_fields_explicitly_requested(question: str, sql
     assert state["query_result"].columns == columns
 
 
+def test_projection_review_repairs_yes_no_comparison_to_a_boolean_result() -> None:
+    adapter = SQLiteAdapter("demo", str(ROOT / "data" / "demo.sqlite"))
+    evidence_sql = (
+        'SELECT "商品名称", "销售价" FROM "商品" '
+        'WHERE "销售价" < (SELECT "销售价" FROM "商品" WHERE "商品名称" = \'显示器 0001\') LIMIT 1'
+    )
+    verdict_sql = (
+        'SELECT NOT EXISTS ('
+        'SELECT 1 FROM "商品" WHERE "销售价" < ('
+        'SELECT "销售价" FROM "商品" WHERE "商品名称" = \'显示器 0001\' LIMIT 1'
+        ')) AS "是否最便宜"'
+    )
+    llm = FakeLLM(
+        [
+            '{"intent":"data_query","confidence":0.96,"reason":"验证上一轮商品是否最便宜"}',
+            evidence_sql,
+            '{"valid": false, "reason": "这是是非验证问题，不能返回其他商品的名称和价格作为间接证据。"}',
+            verdict_sql,
+            '{"valid": true}',
+        ]
+    )
+    graph = build_query_graph(
+        database_executor=adapter,
+        llm_client=llm,
+        schema_retriever=SQLiteSchemaRetriever(adapter),
+        access_policy=policy(),
+        query_timeout_seconds=15,
+        result_summary_enabled=False,
+    )
+
+    state = graph.invoke(
+        create_initial_state(
+            request_id="boolean-comparison-repair",
+            question="这个是最便宜的吗？",
+            database_id="demo",
+            dialect="sqlite",
+            max_iterations=2,
+            conversation_context="历史回合：商品 显示器 0001\n涉及表：商品",
+            conversation_data_context={
+                "selection_source": "recent_history",
+                "candidates": [
+                    {"turn_id": "product-turn", "tables": ["商品"], "columns": ["商品名称", "销售价"], "row_count": 1}
+                ],
+            },
+        )
+    )
+
+    assert state["status"] == "succeeded"
+    assert state["generated_sql"] == verdict_sql
+    assert state["query_result"].columns == ["是否最便宜"]
+    assert "是非验证问题" in llm.prompts[3].to_string()
+    assert [event.node for event in state["trace"]].count("review_sql_projection") == 2
+
+
 class NoExecuteAdapter:
     def __init__(self) -> None:
         self.schema_adapter = SQLiteAdapter("demo", str(ROOT / "data" / "demo.sqlite"))
